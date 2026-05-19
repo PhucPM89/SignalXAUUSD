@@ -1,0 +1,27 @@
+[build]
+builder = "dockerfile"
+
+[[services]]
+name = "signal-api"
+source = "src/backend"
+dockerfile = "Signal.API/Dockerfile"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+
+[[services]]
+name = "signal-engine"
+source = "src/ai-services/signal-engine"
+dockerfile = "Dockerfile"
+healthcheckPath = "/health"
+
+[[services]]
+name = "regime-detector"
+source = "src/ai-services/regime-detector"
+dockerfile = "Dockerfile"
+healthcheckPath = "/health"
+
+[[services]]
+name = "frontend"
+source = "src/frontend"
+dockerfile = "Dockerfile"
+healthcheckPath = "/"

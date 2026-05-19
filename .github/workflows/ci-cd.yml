@@ -1,0 +1,182 @@
+name: Signal Platform CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+
+  # ── Backend: build, test, lint ────────────────────────────────────────────
+  backend:
+    name: ASP.NET Core Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      - name: Test
+        run: dotnet test --no-build -c Release --verbosity normal \
+               --collect:"XPlat Code Coverage" \
+               --results-directory ./coverage
+
+  # ── AI Services: test ─────────────────────────────────────────────────────
+  signal-engine:
+    name: Signal Engine (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ai-services/signal-engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt pytest pytest-asyncio httpx
+      - run: python -m pytest tests/ -v --tb=short
+
+  nlp-service:
+    name: NLP Service (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/ai-services/nlp-service
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt pytest httpx
+      - run: python -m pytest tests/ -v --tb=short
+
+  # ── Frontend: lint, typecheck, build ──────────────────────────────────────
+  frontend:
+    name: Next.js Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:5000
+          NEXT_PUBLIC_HUB_URL: ws://localhost:5000/hubs/trading
+
+  # ── Docker Build & Push (main branch only) ────────────────────────────────
+  docker:
+    name: Build & Push Docker Images
+    needs: [backend, signal-engine, nlp-service, frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      matrix:
+        service:
+          - name: signal-api
+            context: src/backend
+            dockerfile: src/backend/Signal.API/Dockerfile
+          - name: signal-engine
+            context: src/ai-services/signal-engine
+            dockerfile: src/ai-services/signal-engine/Dockerfile
+          - name: nlp-service
+            context: src/ai-services/nlp-service
+            dockerfile: src/ai-services/nlp-service/Dockerfile
+          - name: regime-detector
+            context: src/ai-services/regime-detector
+            dockerfile: src/ai-services/regime-detector/Dockerfile
+          - name: frontend
+            context: src/frontend
+            dockerfile: src/frontend/Dockerfile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service.name }}
+          tags: |
+            type=sha,prefix=git-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service.context }}
+          file: ${{ matrix.service.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Deploy to production ───────────────────────────────────────────────────
+  deploy:
+    name: Deploy to Production
+    needs: [docker]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://${{ vars.DOMAIN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/signal
+            git pull origin main
+            docker compose -f src/infrastructure/docker/docker-compose.yml pull
+            docker compose -f src/infrastructure/docker/docker-compose.yml up -d --remove-orphans
+            docker image prune -f
+            echo "Deployed $(git rev-parse --short HEAD) at $(date -u)"

@@ -1,0 +1,42 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.nupkg
+*.snupkg
+**/appsettings.Development.json
+**/appsettings.Local.json
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Secrets — NEVER commit real keys
+.env
+.env.local
+.env.production
+.env.*.local
+*.secret
+
+# Docker / OS
+.dockerignore
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp

@@ -1,0 +1,143 @@
+import { create } from 'zustand'
+import { devtools, subscribeWithSelector } from 'zustand/middleware'
+import type { Signal, Tick, NewsAlert, EconomicEvent, MarketRegime, SessionType } from '@/types/trading'
+
+interface TradingState {
+  // Live market data
+  currentPrice: number
+  bid: number
+  ask: number
+  spread: number
+  priceChange24H: number
+  priceChangePct: number
+  lastTickAt: string | null
+
+  // Signal state
+  activeSignal: Signal | null
+  signalHistory: Signal[]
+  signalCount: number
+
+  // Market context
+  currentRegime: MarketRegime | null
+  currentSession: SessionType | null
+  isInstitutionalHours: boolean
+
+  // News
+  newsAlerts: NewsAlert[]
+  upcomingEvents: EconomicEvent[]
+  hasHighImpactEventSoon: boolean
+
+  // Correlation panel
+  dxyValue: number
+  dxyChange: number
+  us10YYield: number
+  vix: number
+  isRiskOff: boolean
+
+  // UI state
+  selectedTimeframe: string
+  isConnected: boolean
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
+  isDarkMode: boolean
+
+  // Actions
+  setTick: (tick: Tick) => void
+  setActiveSignal: (signal: Signal | null) => void
+  addSignalToHistory: (signal: Signal) => void
+  setRegime: (regime: MarketRegime) => void
+  addNewsAlert: (news: NewsAlert) => void
+  setEconomicEvents: (events: EconomicEvent[]) => void
+  updateCorrelations: (dxy: number, dxyChg: number, yield10y: number, vix: number) => void
+  setConnectionStatus: (status: TradingState['connectionStatus']) => void
+  setTimeframe: (tf: string) => void
+  toggleDarkMode: () => void
+}
+
+export const useTradingStore = create<TradingState>()(
+  devtools(
+    subscribeWithSelector((set, get) => ({
+      // Initial state
+      currentPrice: 0,
+      bid: 0,
+      ask: 0,
+      spread: 0,
+      priceChange24H: 0,
+      priceChangePct: 0,
+      lastTickAt: null,
+      activeSignal: null,
+      signalHistory: [],
+      signalCount: 0,
+      currentRegime: null,
+      currentSession: null,
+      isInstitutionalHours: false,
+      newsAlerts: [],
+      upcomingEvents: [],
+      hasHighImpactEventSoon: false,
+      dxyValue: 0,
+      dxyChange: 0,
+      us10YYield: 0,
+      vix: 0,
+      isRiskOff: false,
+      selectedTimeframe: 'H1',
+      isConnected: false,
+      connectionStatus: 'disconnected',
+      isDarkMode: true,
+
+      setTick: (tick) => set((s) => {
+        const prevPrice = s.currentPrice || tick.mid
+        return {
+          currentPrice: tick.mid,
+          bid: tick.bid,
+          ask: tick.ask,
+          spread: tick.spread,
+          priceChange24H: tick.mid - prevPrice,
+          lastTickAt: tick.timestamp,
+        }
+      }),
+
+      setActiveSignal: (signal) => set({ activeSignal: signal }),
+
+      addSignalToHistory: (signal) => set((s) => ({
+        signalHistory: [signal, ...s.signalHistory].slice(0, 100),
+        signalCount: s.signalCount + 1,
+        // Replace active signal if it's for the same direction cluster
+        activeSignal: signal,
+      })),
+
+      setRegime: (regime) => set((s) => {
+        const hour = new Date().getUTCHours()
+        const isInstitutional = hour >= 8 && hour <= 20
+        return { currentRegime: regime, isInstitutionalHours: isInstitutional }
+      }),
+
+      addNewsAlert: (news) => set((s) => ({
+        newsAlerts: [news, ...s.newsAlerts].slice(0, 50),
+      })),
+
+      setEconomicEvents: (events) => set({
+        upcomingEvents: events,
+        hasHighImpactEventSoon: events.some((e) => {
+          const minsUntil = (new Date(e.scheduledAt).getTime() - Date.now()) / 60_000
+          return minsUntil <= 30 && minsUntil >= 0 && ['High', 'Critical'].includes(e.impact)
+        }),
+      }),
+
+      updateCorrelations: (dxy, dxyChg, yield10y, vix) => set({
+        dxyValue: dxy,
+        dxyChange: dxyChg,
+        us10YYield: yield10y,
+        vix,
+        isRiskOff: vix > 25,
+      }),
+
+      setConnectionStatus: (status) => set({
+        connectionStatus: status,
+        isConnected: status === 'connected',
+      }),
+
+      setTimeframe: (tf) => set({ selectedTimeframe: tf }),
+      toggleDarkMode: () => set((s) => ({ isDarkMode: !s.isDarkMode })),
+    })),
+    { name: 'XAUUSDTradingStore' }
+  )
+)
