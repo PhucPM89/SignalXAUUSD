@@ -51,11 +51,13 @@ if (!string.IsNullOrEmpty(redisConn))
 
 var app = builder.Build();
 
-if (!string.IsNullOrEmpty(app.Configuration.GetConnectionString("Postgres")))
+using (var scope = app.Services.CreateScope())
 {
-    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    db.Database.Migrate();
+    if (db.Database.IsRelational())
+        db.Database.Migrate();
+    else
+        db.Database.EnsureCreated();
 }
 
 app.UseResponseCompression();

@@ -11,6 +11,8 @@ public sealed record RiskParameters
     public decimal WinProbability { get; init; }  // 0.0 - 1.0
     public decimal ExpectedValue { get; init; }   // Kelly-weighted EV
 
+    private RiskParameters() { }  // required by EF Core
+
     private RiskParameters(
         decimal entry, decimal sl, decimal tp,
         decimal pipSize = 0.01m)
