@@ -25,18 +25,34 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration config)
     {
-        // PostgreSQL via EF Core — TimescaleDB extension for time-series candle data
-        services.AddDbContext<ApplicationDbContext>(opts =>
-            opts.UseNpgsql(config.GetConnectionString("Postgres"),
-                npg => npg.MigrationsAssembly("Signal.Infrastructure")
-                           .EnableRetryOnFailure(3)));
+        var postgresConn = config.GetConnectionString("Postgres");
+        var redisConn = config.GetConnectionString("Redis");
 
-        // Redis — distributed cache + pub/sub for live tick distribution
-        services.AddStackExchangeRedisCache(opts =>
+        if (!string.IsNullOrEmpty(postgresConn))
         {
-            opts.Configuration = config.GetConnectionString("Redis");
-            opts.InstanceName = "Signal:";
-        });
+            services.AddDbContext<ApplicationDbContext>(opts =>
+                opts.UseNpgsql(postgresConn,
+                    npg => npg.MigrationsAssembly("Signal.Infrastructure")
+                               .EnableRetryOnFailure(3)));
+        }
+        else
+        {
+            services.AddDbContext<ApplicationDbContext>(opts =>
+                opts.UseInMemoryDatabase("SignalDb"));
+        }
+
+        if (!string.IsNullOrEmpty(redisConn))
+        {
+            services.AddStackExchangeRedisCache(opts =>
+            {
+                opts.Configuration = redisConn;
+                opts.InstanceName = "Signal:";
+            });
+        }
+        else
+        {
+            services.AddDistributedMemoryCache();
+        }
 
         // Kafka producer — optional (set KAFKA_ENABLED=false to skip for cloud deploys without Kafka)
         var kafkaEnabled = config.GetValue("Kafka:Enabled", true) &&
@@ -150,15 +166,20 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddSignalRWithRedisBackplane(
         this IServiceCollection services, IConfiguration config)
     {
-        services.AddSignalR(opts =>
+        var signalR = services.AddSignalR(opts =>
         {
-            opts.EnableDetailedErrors = false;  // never in prod
+            opts.EnableDetailedErrors = false;
             opts.MaximumReceiveMessageSize = 32 * 1024;
             opts.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
             opts.KeepAliveInterval = TimeSpan.FromSeconds(15);
-        })
-        .AddStackExchangeRedis(config.GetConnectionString("Redis")!,
-            opts => opts.Configuration.ChannelPrefix = RedisChannel.Literal("Signal:Hub"));
+        });
+
+        var redisConn = config.GetConnectionString("Redis");
+        if (!string.IsNullOrEmpty(redisConn))
+        {
+            signalR.AddStackExchangeRedis(redisConn,
+                opts => opts.Configuration.ChannelPrefix = RedisChannel.Literal("Signal:Hub"));
+        }
 
         return services;
     }

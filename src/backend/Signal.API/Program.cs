@@ -63,16 +63,21 @@ builder.Services.AddOpenTelemetry()
         .AddMeter("Signal.SignalEngine")
         .AddPrometheusExporter());
 
-builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("Postgres")!, name: "postgres")
-    .AddRedis(builder.Configuration.GetConnectionString("Redis")!, name: "redis");
+var healthChecks = builder.Services.AddHealthChecks();
+var pgConn = builder.Configuration.GetConnectionString("Postgres");
+var redisConn = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrEmpty(pgConn))
+    healthChecks.AddNpgSql(pgConn, name: "postgres");
+if (!string.IsNullOrEmpty(redisConn))
+    healthChecks.AddRedis(redisConn, name: "redis");
 
 // ── App Pipeline ──────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// Auto-migrate DB on startup (safe — EF migrations are idempotent)
-using (var scope = app.Services.CreateScope())
+// Auto-migrate only when using a real Postgres DB (not in-memory)
+if (!string.IsNullOrEmpty(app.Configuration.GetConnectionString("Postgres")))
 {
+    using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     db.Database.Migrate();
 }
