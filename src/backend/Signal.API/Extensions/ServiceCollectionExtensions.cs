@@ -1,4 +1,3 @@
-using Confluent.Kafka;
 using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,7 +8,6 @@ using Polly.Extensions.Http;
 using Signal.Application.Behaviors;
 using Signal.Application.Interfaces;
 using Signal.API.Hubs;
-using Signal.API.Infrastructure;
 using StackExchange.Redis;
 using Signal.Infrastructure.Data;
 using Signal.Infrastructure.ExternalServices;
@@ -52,30 +50,6 @@ public static class ServiceCollectionExtensions
         else
         {
             services.AddDistributedMemoryCache();
-        }
-
-        // Kafka producer — optional (set KAFKA_ENABLED=false to skip for cloud deploys without Kafka)
-        var kafkaEnabled = config.GetValue("Kafka:Enabled", true) &&
-                           !string.IsNullOrEmpty(config["Kafka:BootstrapServers"]);
-
-        if (kafkaEnabled)
-        {
-            services.AddSingleton<IProducer<string, string>>(sp =>
-            {
-                var producerConfig = new ProducerConfig
-                {
-                    BootstrapServers = config["Kafka:BootstrapServers"],
-                    Acks = Acks.Leader,
-                    LingerMs = 0,
-                    MessageTimeoutMs = 5000,
-                    CompressionType = CompressionType.Lz4
-                };
-                return new ProducerBuilder<string, string>(producerConfig).Build();
-            });
-        }
-        else
-        {
-            services.AddSingleton<IProducer<string, string>, NullKafkaProducer>();
         }
 
         // HTTP clients with Polly retry + circuit breaker
