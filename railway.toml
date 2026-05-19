@@ -1,27 +1,7 @@
-[build]
-builder = "dockerfile"
-
-[[services]]
-name = "signal-api"
-source = "src/backend"
-dockerfile = "Signal.API/Dockerfile"
-healthcheckPath = "/health"
-healthcheckTimeout = 30
-
-[[services]]
-name = "signal-engine"
-source = "src/ai-services/signal-engine"
-dockerfile = "Dockerfile"
-healthcheckPath = "/health"
-
-[[services]]
-name = "regime-detector"
-source = "src/ai-services/regime-detector"
-dockerfile = "Dockerfile"
-healthcheckPath = "/health"
-
-[[services]]
-name = "frontend"
-source = "src/frontend"
-dockerfile = "Dockerfile"
-healthcheckPath = "/"
+# Root railway.toml — intentionally empty.
+# Each service has its own railway.toml in its subdirectory.
+# In Railway UI: create 4 services, set Root Directory for each:
+#   signal-api      → src/backend
+#   signal-engine   → src/ai-services/signal-engine
+#   regime-detector → src/ai-services/regime-detector
+#   frontend        → src/frontend
