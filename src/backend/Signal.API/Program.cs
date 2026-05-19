@@ -1,8 +1,5 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
-using OpenTelemetry.Metrics;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using Signal.API.Extensions;
 using Signal.API.Hubs;
 using Signal.API.Middleware;
@@ -11,7 +8,6 @@ using Signal.Infrastructure.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -39,29 +35,11 @@ builder.Services.AddCors(opts =>
         p.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
          .AllowAnyHeader()
          .AllowAnyMethod()
-         .AllowCredentials()));   // required for SignalR cookies/auth
+         .AllowCredentials()));
 
-// Background workers
 builder.Services.AddHostedService<SignalGenerationWorker>();
 builder.Services.AddHostedService<MarketTickWorker>();
 builder.Services.AddHostedService<NewsIngestionWorker>();
-
-// ── Observability ─────────────────────────────────────────────────────────────
-builder.Services.AddOpenTelemetry()
-    .ConfigureResource(r => r.AddService("Signal.API"))
-    .WithTracing(t => t
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddEntityFrameworkCoreInstrumentation()
-        .AddSource("Signal.*")
-        .AddOtlpExporter(o => o.Endpoint = new Uri(
-            builder.Configuration["OtelCollector:Endpoint"] ?? "http://otel-collector:4317")))
-    .WithMetrics(m => m
-        .AddAspNetCoreInstrumentation()
-        .AddHttpClientInstrumentation()
-        .AddRuntimeInstrumentation()
-        .AddMeter("Signal.SignalEngine")
-        .AddPrometheusExporter());
 
 var healthChecks = builder.Services.AddHealthChecks();
 var pgConn = builder.Configuration.GetConnectionString("Postgres");
@@ -71,10 +49,8 @@ if (!string.IsNullOrEmpty(pgConn))
 if (!string.IsNullOrEmpty(redisConn))
     healthChecks.AddRedis(redisConn, name: "redis");
 
-// ── App Pipeline ──────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// Auto-migrate only when using a real Postgres DB (not in-memory)
 if (!string.IsNullOrEmpty(app.Configuration.GetConnectionString("Postgres")))
 {
     using var scope = app.Services.CreateScope();
@@ -83,12 +59,8 @@ if (!string.IsNullOrEmpty(app.Configuration.GetConnectionString("Postgres")))
 }
 
 app.UseResponseCompression();
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseMiddleware<RequestTimingMiddleware>();
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -98,12 +70,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<TradingHub>("/hubs/trading");
-app.MapPrometheusScrapingEndpoint("/metrics");   // Prometheus scrape target
 app.MapHealthChecks("/health", new HealthCheckOptions { ResponseWriter = WriteHealthResponse });
-app.MapHealthChecks("/health/ready", new HealthCheckOptions
-{
-    Predicate = hc => hc.Tags.Contains("ready")
-});
 
 app.Run();
 
