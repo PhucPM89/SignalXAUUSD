@@ -1,30 +1,31 @@
 const YAHOO_BASE = 'https://query1.finance.yahoo.com'
+const YAHOO_BASE2 = 'https://query2.finance.yahoo.com'
 
 const YAHOO_SYMBOLS: Record<string, string> = {
   XAUUSD: 'GC=F',
-  DXY: 'DX-Y.NYB',
-  US10Y: '^TNX',
-  VIX: '^VIX',
-  SPX: '^GSPC',
+  DXY:    'DX-Y.NYB',
+  US10Y:  '^TNX',
+  VIX:    '^VIX',
+  SPX:    '^GSPC',
 }
 
 function toYahooParams(tf: string): { interval: string; range: string } {
   switch (tf) {
-    case 'M5':  return { interval: '5m',  range: '5d' }
-    case 'M15': return { interval: '15m', range: '7d' }
-    case 'M30': return { interval: '30m', range: '14d' }
-    case 'H4':  return { interval: '1h',  range: '60d' }
-    case 'D1':  return { interval: '1d',  range: '1y' }
-    default:    return { interval: '1h',  range: '30d' }  // H1
+    case 'M5':  return { interval: '5m',  range: '5d'   }
+    case 'M15': return { interval: '15m', range: '14d'  }
+    case 'M30': return { interval: '30m', range: '14d'  }
+    case 'H4':  return { interval: '1h',  range: '180d' }
+    case 'D1':  return { interval: '1d',  range: '2y'   }
+    default:    return { interval: '1h',  range: '30d'  }  // H1
   }
 }
 
 export interface CandleData {
-  time: number
-  open: number
-  high: number
-  low: number
-  close: number
+  time:   number
+  open:   number
+  high:   number
+  low:    number
+  close:  number
   volume: number
 }
 
@@ -39,7 +40,7 @@ export async function fetchCandles(
 
   try {
     const res = await fetch(url, { next: { revalidate: 60 } })
-    if (!res.ok) throw new Error(`Yahoo returned ${res.status}`)
+    if (!res.ok) throw new Error(`Yahoo ${res.status}`)
     const data = await res.json()
     const result = data?.chart?.result?.[0]
     const timestamps: number[] = result?.timestamp ?? []
@@ -85,9 +86,11 @@ async function tryTwelveData(symbol: string, timeframe: string, count: number): 
     return (d.values as Record<string, string>[])
       .reverse()
       .map(v => ({
-        time: Math.floor(new Date(v.datetime).getTime() / 1000),
-        open: parseFloat(v.open), high: parseFloat(v.high),
-        low: parseFloat(v.low), close: parseFloat(v.close),
+        time:   Math.floor(new Date(v.datetime).getTime() / 1000),
+        open:   parseFloat(v.open),
+        high:   parseFloat(v.high),
+        low:    parseFloat(v.low),
+        close:  parseFloat(v.close),
         volume: parseFloat(v.volume ?? '0'),
       }))
   } catch {
@@ -95,69 +98,232 @@ async function tryTwelveData(symbol: string, timeframe: string, count: number): 
   }
 }
 
-export async function fetchCurrentPrice(symbol: string): Promise<number> {
+// ── Tick data (price + 24H change) ────────────────────────────────────────────
+
+export interface TickData {
+  price:        number
+  change24H:    number
+  changePct24H: number
+}
+
+let _tickCache: TickData = { price: 0, change24H: 0, changePct24H: 0 }
+let _tickTs = 0
+const TICK_CACHE_MS = 1_500
+
+export async function fetchTickData(symbol: string): Promise<TickData> {
+  const now = Date.now()
+  if (_tickCache.price > 0 && now - _tickTs < TICK_CACHE_MS) return _tickCache
+
   const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
   try {
-    const res = await fetch(`${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=1d`,
-      { cache: 'no-store' })
+    const res = await fetch(
+      `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=1d`,
+      { cache: 'no-store' }
+    )
     const data = await res.json()
-    return (data?.chart?.result?.[0]?.meta?.regularMarketPrice as number) ?? 0
+    const meta = data?.chart?.result?.[0]?.meta
+    const price      = (meta?.regularMarketPrice  as number) ?? 0
+    const prevClose  = (meta?.chartPreviousClose  as number) ?? price
+    const change24H  = price - prevClose
+    const changePct24H = prevClose > 0 ? (change24H / prevClose) * 100 : 0
+    if (price > 0) {
+      _tickCache = { price, change24H, changePct24H }
+      _tickTs = now
+    }
+    return _tickCache
   } catch {
-    return 0
+    return _tickCache
   }
 }
 
+// ── Correlations (with actual 1H changes) ─────────────────────────────────────
+
 export interface CorrelationSnapshot {
-  dxyValue: number
-  dxyChange1H: number
-  us10YYield: number
-  us10YChange1H: number
-  vix: number
-  spxChange1D: number
-  isRiskOff: boolean
-  isRiskOn: boolean
+  dxyValue:      number
+  dxyChange1H:   number  // absolute index-point change (e.g. 0.1 = DXY moved 0.1 pts)
+  us10YYield:    number
+  us10YChange1H: number  // absolute yield change in pct-pts (e.g. 0.02 = 2 bps)
+  vix:           number
+  spxChange1D:   number  // daily % change (e.g. -1.5 = SPX -1.5%)
+  isRiskOff:     boolean
+  isRiskOn:      boolean
+}
+
+async function fetchSymbolHourly(sym: string) {
+  try {
+    const res = await fetch(
+      `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=5d`,
+      { next: { revalidate: 120 } }
+    )
+    const data  = await res.json()
+    const result = data?.chart?.result?.[0]
+    const meta   = result?.meta
+    const closes = (result?.indicators?.quote?.[0]?.close ?? []) as (number | null)[]
+
+    const price     = (meta?.regularMarketPrice  as number) ?? 0
+    const prevDay   = (meta?.chartPreviousClose  as number) ?? price
+    const valid     = closes.filter((c): c is number => c != null)
+    const prev1H    = valid.length >= 2 ? valid[valid.length - 2] : price
+    const change1H  = price - prev1H
+    const changePct1D = prevDay > 0 ? (price - prevDay) / prevDay * 100 : 0
+    return { price, change1H, changePct1D }
+  } catch {
+    return { price: 0, change1H: 0, changePct1D: 0 }
+  }
 }
 
 export async function fetchCorrelations(): Promise<CorrelationSnapshot> {
-  const symbols = ['DX-Y.NYB', '^TNX', '^VIX', '^GSPC']
-
-  const prices = await Promise.all(
-    symbols.map(sym =>
-      fetch(`${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=2d`,
-        { next: { revalidate: 60 } })
-        .then(r => r.json())
-        .then(d => (d?.chart?.result?.[0]?.meta?.regularMarketPrice as number) ?? 0)
-        .catch(() => 0)
-    )
-  )
-
-  const [dxy, us10y, vix, spx] = prices
+  const [dxy, us10y, vix, spx] = await Promise.all([
+    fetchSymbolHourly('DX-Y.NYB'),
+    fetchSymbolHourly('^TNX'),
+    fetchSymbolHourly('^VIX'),
+    fetchSymbolHourly('^GSPC'),
+  ])
 
   return {
-    dxyValue: dxy,
-    dxyChange1H: 0,
-    us10YYield: us10y,
-    us10YChange1H: 0,
-    vix,
-    spxChange1D: 0,
-    isRiskOff: vix > 25,
-    isRiskOn: vix > 0 && vix < 15,
+    dxyValue:      dxy.price,
+    dxyChange1H:   dxy.change1H,
+    us10YYield:    us10y.price,
+    us10YChange1H: us10y.change1H,
+    vix:           vix.price,
+    spxChange1D:   spx.changePct1D,
+    isRiskOff:     vix.price > 25,
+    isRiskOn:      vix.price > 0 && vix.price < 15,
   }
 }
+
+// ── News ──────────────────────────────────────────────────────────────────────
+
+export interface NewsItem {
+  headline:       string
+  source:         string
+  publishedAt:    string
+  sentimentScore: number  // –1 to +1 (Gold perspective)
+  impact:         'Critical' | 'High' | 'Medium' | 'Low' | 'None'
+}
+
+const BULLISH_GOLD = [
+  'inflation', 'rate cut', 'dovish', 'safe-haven', 'safe haven', 'geopolit', 'war',
+  'crisis', 'recession', 'fear', 'uncertainty', 'debt', 'deficit', 'surge', 'rally',
+  'rate pause', 'weaker dollar', 'dollar weakness', 'rate hold',
+]
+const BEARISH_GOLD = [
+  'rate hike', 'hawkish', 'dollar strength', 'strong economy', 'taper', 'recovery',
+  'growth', 'risk-on', 'equities rise', 'stock market rally', 'plunge gold',
+]
+const HIGH_IMPACT_KEYWORDS = [
+  'fed', 'federal reserve', 'powell', 'fomc', 'cpi', 'nfp', 'non-farm', 'jobs report',
+  'interest rate', 'rate decision', 'ecb', 'boe', 'central bank',
+]
+const MED_IMPACT_KEYWORDS = [
+  'gold', 'xau', 'inflation', 'gdp', 'pce', 'pmi', 'retail sales', 'employment',
+]
+
+function scoreNewsSentiment(headline: string): number {
+  const h = headline.toLowerCase()
+  let score = 0
+  BULLISH_GOLD.forEach(w => { if (h.includes(w)) score += 0.25 })
+  BEARISH_GOLD.forEach(w => { if (h.includes(w)) score -= 0.25 })
+  return Math.max(-1, Math.min(1, score))
+}
+
+function classifyNewsImpact(headline: string): NewsItem['impact'] {
+  const h = headline.toLowerCase()
+  if (HIGH_IMPACT_KEYWORDS.some(w => h.includes(w))) return 'High'
+  if (MED_IMPACT_KEYWORDS.some(w => h.includes(w)))  return 'Medium'
+  return 'Low'
+}
+
+export async function fetchGoldNews(): Promise<NewsItem[]> {
+  try {
+    const url = `${YAHOO_BASE2}/v1/finance/search?q=gold+XAU+GC%3DF&newsCount=20&enableFuzzyQuery=false&region=US&lang=en-US`
+    const res = await fetch(url, { next: { revalidate: 300 } })
+    if (!res.ok) throw new Error(`Yahoo news ${res.status}`)
+    const data = await res.json()
+    const articles: Record<string, unknown>[] = data?.news ?? []
+
+    return articles
+      .filter(a => a.title && a.providerPublishTime)
+      .map(a => {
+        const headline = a.title as string
+        return {
+          headline,
+          source:         (a.publisher as string) ?? 'Yahoo Finance',
+          publishedAt:    new Date((a.providerPublishTime as number) * 1000).toISOString(),
+          sentimentScore: scoreNewsSentiment(headline),
+          impact:         classifyNewsImpact(headline),
+        }
+      })
+      .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+  } catch {
+    return []
+  }
+}
+
+// ── Economic calendar (ForexFactory) ─────────────────────────────────────────
+
+export interface CalendarEvent {
+  name:        string
+  currency:    string
+  scheduledAt: string
+  impact:      'Critical' | 'High' | 'Medium' | 'Low' | 'None'
+  forecast?:   string
+  previous?:   string
+}
+
+const FF_IMPACT: Record<string, CalendarEvent['impact']> = {
+  'High':    'High',
+  'Medium':  'Medium',
+  'Low':     'Low',
+  'Holiday': 'None',
+}
+
+const GOLD_RELEVANT_CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CHF'])
+
+export async function fetchEconomicCalendar(): Promise<CalendarEvent[]> {
+  try {
+    const res = await fetch(
+      'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
+      { next: { revalidate: 3600 } }
+    )
+    if (!res.ok) throw new Error(`FF calendar ${res.status}`)
+    const data = await res.json()
+    if (!Array.isArray(data)) return []
+
+    return (data as Record<string, string>[])
+      .filter(e =>
+        GOLD_RELEVANT_CURRENCIES.has(e.country) &&
+        (e.impact === 'High' || e.impact === 'Medium')
+      )
+      .map(e => ({
+        name:        e.title,
+        currency:    e.country,
+        scheduledAt: e.date,
+        impact:      FF_IMPACT[e.impact] ?? 'None',
+        forecast:    e.forecast   || undefined,
+        previous:    e.previous   || undefined,
+      }))
+      .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+  } catch {
+    return []
+  }
+}
+
+// ── Synthetic fallback ────────────────────────────────────────────────────────
 
 export function generateSyntheticCandles(count: number): CandleData[] {
   const candles: CandleData[] = []
   let price = 3285
   const now = Math.floor(Date.now() / 1000)
   for (let i = count - 1; i >= 0; i--) {
-    const open = price
+    const open   = price
     const change = (Math.random() * 2 - 1) * 8
-    const close = open + change
-    const wick = Math.random() * 4
+    const close  = open + change
+    const wick   = Math.random() * 4
     candles.push({
       time: now - i * 3600,
       open, high: Math.max(open, close) + wick,
-      low: Math.min(open, close) - wick,
+      low:  Math.min(open, close) - wick,
       close, volume: Math.floor(Math.random() * 5000 + 500),
     })
     price = close
@@ -171,7 +337,7 @@ export function calcAtr(candles: CandleData[]): number {
   for (let i = 1; i < candles.length; i++) {
     const hl = candles[i].high - candles[i].low
     const hc = Math.abs(candles[i].high - candles[i - 1].close)
-    const lc = Math.abs(candles[i].low - candles[i - 1].close)
+    const lc = Math.abs(candles[i].low  - candles[i - 1].close)
     sum += Math.max(hl, hc, lc)
   }
   return sum / (candles.length - 1)

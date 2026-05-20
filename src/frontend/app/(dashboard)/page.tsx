@@ -39,7 +39,7 @@ export default function DashboardPage() {
 
   async function fetchCandles(timeframe: string) {
     try {
-      const res = await fetch(`/api/market/candles?timeframe=${timeframe}&count=200`)
+      const res = await fetch(`/api/market/candles?timeframe=${timeframe}&count=500`)
       if (res.ok) {
         const data: Candle[] = await res.json()
         setCandles(data)

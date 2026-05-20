@@ -45,7 +45,9 @@ interface TradingState {
   setActiveSignal: (signal: Signal | null) => void
   addSignalToHistory: (signal: Signal) => void
   setRegime: (regime: MarketRegime) => void
+  setSession: (session: SessionType) => void
   addNewsAlert: (news: NewsAlert) => void
+  setNewsAlerts: (alerts: NewsAlert[]) => void
   setEconomicEvents: (events: EconomicEvent[]) => void
   updateCorrelations: (dxy: number, dxyChg: number, yield10y: number, vix: number) => void
   setConnectionStatus: (status: TradingState['connectionStatus']) => void
@@ -55,7 +57,7 @@ interface TradingState {
 
 export const useTradingStore = create<TradingState>()(
   devtools(
-    subscribeWithSelector((set, get) => ({
+    subscribeWithSelector((set) => ({
       // Initial state
       currentPrice: 0,
       bid: 0,
@@ -83,36 +85,38 @@ export const useTradingStore = create<TradingState>()(
       connectionStatus: 'disconnected',
       isDarkMode: true,
 
-      setTick: (tick) => set((s) => {
-        const prevPrice = s.currentPrice || tick.mid
-        return {
-          currentPrice: tick.mid,
-          bid: tick.bid,
-          ask: tick.ask,
-          spread: tick.spread,
-          priceChange24H: tick.mid - prevPrice,
-          lastTickAt: tick.timestamp,
-        }
+      setTick: (tick) => set({
+        currentPrice:   tick.mid,
+        bid:            tick.bid,
+        ask:            tick.ask,
+        spread:         tick.spread,
+        priceChange24H: tick.change24H,
+        priceChangePct: tick.changePct24H,
+        lastTickAt:     tick.timestamp,
       }),
 
       setActiveSignal: (signal) => set({ activeSignal: signal }),
 
       addSignalToHistory: (signal) => set((s) => ({
-        signalHistory: [signal, ...s.signalHistory].slice(0, 100),
-        signalCount: s.signalCount + 1,
-        // Replace active signal if it's for the same direction cluster
-        activeSignal: signal,
+        signalHistory:  [signal, ...s.signalHistory].slice(0, 100),
+        signalCount:    s.signalCount + 1,
+        activeSignal:   signal,
+        currentSession: signal.session ?? s.currentSession,
+        currentRegime:  signal.regime  ?? s.currentRegime,
       })),
 
-      setRegime: (regime) => set((s) => {
-        const hour = new Date().getUTCHours()
-        const isInstitutional = hour >= 8 && hour <= 20
-        return { currentRegime: regime, isInstitutionalHours: isInstitutional }
+      setRegime: (regime) => set({
+        currentRegime:        regime,
+        isInstitutionalHours: new Date().getUTCHours() >= 8 && new Date().getUTCHours() <= 20,
       }),
+
+      setSession: (session) => set({ currentSession: session }),
 
       addNewsAlert: (news) => set((s) => ({
         newsAlerts: [news, ...s.newsAlerts].slice(0, 50),
       })),
+
+      setNewsAlerts: (alerts) => set({ newsAlerts: alerts }),
 
       setEconomicEvents: (events) => set({
         upcomingEvents: events,
@@ -123,19 +127,19 @@ export const useTradingStore = create<TradingState>()(
       }),
 
       updateCorrelations: (dxy, dxyChg, yield10y, vix) => set({
-        dxyValue: dxy,
-        dxyChange: dxyChg,
+        dxyValue:   dxy,
+        dxyChange:  dxyChg,
         us10YYield: yield10y,
         vix,
-        isRiskOff: vix > 25,
+        isRiskOff:  vix > 25,
       }),
 
       setConnectionStatus: (status) => set({
         connectionStatus: status,
-        isConnected: status === 'connected',
+        isConnected:      status === 'connected',
       }),
 
-      setTimeframe: (tf) => set({ selectedTimeframe: tf }),
+      setTimeframe:   (tf) => set({ selectedTimeframe: tf }),
       toggleDarkMode: () => set((s) => ({ isDarkMode: !s.isDarkMode })),
     })),
     { name: 'XAUUSDTradingStore' }

@@ -144,12 +144,14 @@ export interface Candle {
 }
 
 export interface Tick {
-  symbol: string
-  bid: number
-  ask: number
-  mid: number
-  spread: number
-  timestamp: string
+  symbol:       string
+  bid:          number
+  ask:          number
+  mid:          number
+  spread:       number
+  change24H:    number
+  changePct24H: number
+  timestamp:    string
 }
 
 export interface NewsAlert {

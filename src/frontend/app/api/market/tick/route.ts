@@ -1,29 +1,19 @@
 import { NextResponse } from 'next/server'
-import { fetchCurrentPrice } from '@/lib/market-data'
-
-// Module-level cache — avoids slamming Yahoo Finance on every 1s client poll
-let _price = 0
-let _ts = 0
-const CACHE_MS = 1_500
+import { fetchTickData } from '@/lib/market-data'
 
 export async function GET() {
-  const now = Date.now()
-  if (_price > 0 && now - _ts < CACHE_MS) {
-    // Serve stale value immediately; background-refresh happens next cache miss
-  } else {
-    const fetched = await fetchCurrentPrice('XAUUSD')
-    if (fetched > 0) { _price = fetched; _ts = now }
-  }
-
-  const price  = _price
+  const td     = await fetchTickData('XAUUSD')
   const spread = 0.02
+  const price  = td.price
 
   return NextResponse.json({
-    symbol:    'XAUUSD',
-    bid:       Math.round((price - spread / 2) * 100) / 100,
-    ask:       Math.round((price + spread / 2) * 100) / 100,
-    mid:       Math.round(price * 100) / 100,
+    symbol:       'XAUUSD',
+    bid:          Math.round((price - spread / 2) * 100) / 100,
+    ask:          Math.round((price + spread / 2) * 100) / 100,
+    mid:          Math.round(price * 100) / 100,
     spread,
-    timestamp: new Date().toISOString(),
+    change24H:    Math.round(td.change24H * 100) / 100,
+    changePct24H: Math.round(td.changePct24H * 100) / 100,
+    timestamp:    new Date().toISOString(),
   })
 }
