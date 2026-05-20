@@ -9,6 +9,7 @@ import SignalCard from '@/components/signals/SignalCard'
 import CorrelationPanel from '@/components/macro/CorrelationPanel'
 import NewsPanel from '@/components/news/NewsPanel'
 import LiveWinRatePanel from '@/components/signals/LiveWinRatePanel'
+import SignalHistoryPanel from '@/components/signals/SignalHistoryPanel'
 import { SessionPanel } from '@/components/panels/SessionPanel'
 import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
 import { cn } from '@/lib/utils'
@@ -19,7 +20,7 @@ import { Activity, BarChart2, Globe } from 'lucide-react'
 type MobileTab = 'signal' | 'chart' | 'market'
 
 export default function DashboardPage() {
-  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon, selectedTimeframe, lastSignalResult, signalPhase } = useTradingStore()
+  const { activeSignal, isConnected, hasHighImpactEventSoon, selectedTimeframe, lastSignalResult, signalPhase } = useTradingStore()
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<MobileTab>('chart')
@@ -54,8 +55,7 @@ export default function DashboardPage() {
     }
   }, [candles])
 
-  const displayedHistory = signalHistory.slice(0, 8)
-  const hasActiveSignal  = activeSignal && activeSignal.direction !== 'NOTRADE'
+  const hasActiveSignal = activeSignal && activeSignal.direction !== 'NOTRADE'
 
   return (
     <div className="h-full bg-[#0a0a0f] text-white flex flex-col overflow-hidden">
@@ -150,38 +150,9 @@ export default function DashboardPage() {
             <LiveWinRatePanel />
           </div>
 
-          {/* Signal history — scrollable on desktop, natural flow on mobile */}
-          <div className="lg:flex-1 lg:overflow-y-auto px-3 pb-3">
-            {displayedHistory.length > 0 && (
-              <>
-                <div className="flex items-center gap-1.5 mb-2 pt-1">
-                  <BarChart2 size={10} className="text-zinc-500" />
-                  <span className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold">
-                    Recent Signals
-                  </span>
-                </div>
-                <div className="space-y-1.5">
-                  {displayedHistory.map((sig) => (
-                    <div
-                      key={sig.id}
-                      className="flex items-center justify-between py-1.5 px-2 bg-zinc-800/30 rounded text-[10px] hover:bg-zinc-800/50 cursor-pointer"
-                      onClick={() => setExpandedSignalId(sig.id === expandedSignalId ? null : sig.id)}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={cn(
-                          'font-bold',
-                          sig.direction === 'BUY' ? 'text-emerald-400' : 'text-red-400'
-                        )}>
-                          {sig.direction}
-                        </span>
-                        <span className="text-zinc-400 font-mono">{sig.entryPrice.toFixed(2)}</span>
-                      </div>
-                      <span className="text-zinc-500">{sig.confidenceScore}%</span>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+          {/* Signal history — Firebase-backed, paginated */}
+          <div className="lg:flex-1 lg:overflow-hidden border-t border-zinc-800/60 flex flex-col min-h-0">
+            <SignalHistoryPanel />
           </div>
         </aside>
 

@@ -172,6 +172,22 @@ export interface EconomicEvent {
   previous?:   string | number
 }
 
+export interface ClosedSignalRecord {
+  id:      string
+  dir:     string   // 'BUY' | 'SELL'
+  entry:   number
+  sl:      number
+  tp:      number
+  rr:      number
+  conf:    number
+  regime:  string
+  session: string
+  at:      string   // generatedAt ISO
+  closed:  string   // closedAt ISO
+  result:  string   // 'TP_HIT' | 'SL_HIT' | 'EXPIRED' | 'TRAILED_SL'
+  pnl:     number   // price points (e.g. +14.50 means +$14.50/oz)
+}
+
 // Gold-specific display helpers
 export const GOLD_PIP = 0.01
 export const formatGold = (price: number) => price.toFixed(2)
