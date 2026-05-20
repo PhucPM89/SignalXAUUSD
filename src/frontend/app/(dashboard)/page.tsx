@@ -27,15 +27,15 @@ import { Activity, BarChart2 } from 'lucide-react'
  * No prop drilling — state flows: SignalR → store → components.
  */
 export default function DashboardPage() {
-  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon } = useTradingStore()
+  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon, selectedTimeframe } = useTradingStore()
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
 
   useLiveData()
 
   useEffect(() => {
-    fetchCandles('H1')
-  }, [])
+    fetchCandles(selectedTimeframe)
+  }, [selectedTimeframe])
 
   async function fetchCandles(timeframe: string) {
     try {

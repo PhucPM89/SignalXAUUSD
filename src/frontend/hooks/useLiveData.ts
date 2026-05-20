@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import type { Signal, Tick } from '@/types/trading'
 
-const TICK_INTERVAL_MS    = 2_000
+const TICK_INTERVAL_MS    = 1_000
 const SIGNAL_INTERVAL_MS  = 30_000
 const CORR_INTERVAL_MS    = 60_000
 
