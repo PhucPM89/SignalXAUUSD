@@ -163,12 +163,13 @@ export interface NewsAlert {
 }
 
 export interface EconomicEvent {
-  name: string
-  currency: string
-  impact: NewsImpact
+  name:        string
+  currency:    string
+  impact:      NewsImpact
   scheduledAt: string
-  actual?: number
-  forecast?: number
+  actual?:     string | number
+  forecast?:   string | number
+  previous?:   string | number
 }
 
 // Gold-specific display helpers

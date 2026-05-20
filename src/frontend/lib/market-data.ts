@@ -278,30 +278,42 @@ const FF_IMPACT: Record<string, CalendarEvent['impact']> = {
   'Holiday': 'None',
 }
 
-const GOLD_RELEVANT_CURRENCIES = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CHF'])
+// USD events of any impact; other currencies only High/Medium
+const ALWAYS_SHOW = new Set(['USD'])
+const SOMETIMES_SHOW = new Set(['EUR', 'GBP', 'JPY', 'CNY', 'CHF'])
 
 export async function fetchEconomicCalendar(): Promise<CalendarEvent[]> {
   try {
     const res = await fetch(
       'https://nfs.faireconomy.media/ff_calendar_thisweek.json',
-      { next: { revalidate: 3600 } }
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; Signal-Dashboard/1.0)',
+          'Accept':     'application/json',
+        },
+        next: { revalidate: 3600 },
+      }
     )
     if (!res.ok) throw new Error(`FF calendar ${res.status}`)
-    const data = await res.json()
+    const text = await res.text()
+    if (text.trim().startsWith('<')) throw new Error('Rate limited — got HTML')
+    const data = JSON.parse(text)
     if (!Array.isArray(data)) return []
 
     return (data as Record<string, string>[])
-      .filter(e =>
-        GOLD_RELEVANT_CURRENCIES.has(e.country) &&
-        (e.impact === 'High' || e.impact === 'Medium')
-      )
+      .filter(e => {
+        if (e.impact === 'Holiday') return false
+        if (ALWAYS_SHOW.has(e.country))    return true
+        if (SOMETIMES_SHOW.has(e.country)) return e.impact === 'High' || e.impact === 'Medium'
+        return false
+      })
       .map(e => ({
-        name:        e.title,
+        name:        e.title || e.event || 'Event',
         currency:    e.country,
         scheduledAt: e.date,
         impact:      FF_IMPACT[e.impact] ?? 'None',
-        forecast:    e.forecast   || undefined,
-        previous:    e.previous   || undefined,
+        forecast:    e.forecast  || undefined,
+        previous:    e.previous  || undefined,
       }))
       .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
   } catch {
