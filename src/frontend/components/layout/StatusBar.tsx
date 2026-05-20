@@ -1,29 +1,60 @@
 'use client'
 
+import { useMemo, useSyncExternalStore } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
-import { REGIME_COLORS, IMPACT_COLORS, formatGold } from '@/types/trading'
+import { REGIME_COLORS, formatGold } from '@/types/trading'
 import { cn } from '@/lib/utils'
-import { Wifi, WifiOff, AlertCircle, Clock } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { Wifi, WifiOff, AlertCircle } from 'lucide-react'
 
-/**
- * Always-visible status bar — top of the dashboard.
- * Shows: connection status | live XAUUSD price | regime | session | event warnings
- */
+// Selective store subscriptions — component only re-renders when its own fields change
+function useStatusBarStore() {
+  const currentPrice      = useTradingStore(s => s.currentPrice)
+  const bid               = useTradingStore(s => s.bid)
+  const ask               = useTradingStore(s => s.ask)
+  const spread            = useTradingStore(s => s.spread)
+  const priceChange24H    = useTradingStore(s => s.priceChange24H)
+  const priceChangePct    = useTradingStore(s => s.priceChangePct)
+  const currentRegime     = useTradingStore(s => s.currentRegime)
+  const currentSession    = useTradingStore(s => s.currentSession)
+  const isConnected       = useTradingStore(s => s.isConnected)
+  const connectionStatus  = useTradingStore(s => s.connectionStatus)
+  const hasHighImpact     = useTradingStore(s => s.hasHighImpactEventSoon)
+  const upcomingEvents    = useTradingStore(s => s.upcomingEvents)
+  const lastTickAt        = useTradingStore(s => s.lastTickAt)
+  return { currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
+    currentRegime, currentSession, isConnected, connectionStatus,
+    hasHighImpact, upcomingEvents, lastTickAt }
+}
+
+// Live clock ticking every second for accurate event countdown
+function useNow() {
+  return useSyncExternalStore(
+    (cb) => { const id = setInterval(cb, 1_000); return () => clearInterval(id) },
+    () => Date.now(),
+    () => Date.now(),
+  )
+}
+
 export default function StatusBar() {
   const {
-    currentPrice, bid, ask, spread,
-    priceChange24H, priceChangePct,
-    currentRegime, currentSession,
-    isConnected, connectionStatus,
-    hasHighImpactEventSoon, upcomingEvents,
-    lastTickAt,
-  } = useTradingStore()
+    currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
+    currentRegime, currentSession, isConnected, connectionStatus,
+    hasHighImpact, upcomingEvents, lastTickAt,
+  } = useStatusBarStore()
+
+  const now = useNow()
+
+  const nextEvent = useMemo(() =>
+    upcomingEvents
+      .filter(e => ['High', 'Critical'].includes(e.impact))
+      .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0],
+    [upcomingEvents]
+  )
 
   const priceUp = priceChange24H >= 0
-  const nextEvent = upcomingEvents
-    .filter(e => ['High', 'Critical'].includes(e.impact))
-    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())[0]
+  const minsUntil = nextEvent
+    ? Math.max(0, Math.round((new Date(nextEvent.scheduledAt).getTime() - now) / 60_000))
+    : 0
 
   return (
     <div className="h-10 bg-zinc-900/95 border-b border-zinc-800 flex items-center px-4 gap-6 text-xs flex-shrink-0 z-50">
@@ -79,14 +110,13 @@ export default function StatusBar() {
       </div>
 
       {/* Upcoming high-impact event warning */}
-      {hasHighImpactEventSoon && nextEvent && (
+      {hasHighImpact && nextEvent && (
         <>
           <Divider />
           <div className="flex items-center gap-1.5 text-amber-400 animate-pulse">
             <AlertCircle size={11} />
             <span className="text-[10px] font-bold uppercase">
-              {nextEvent.name} ({nextEvent.currency}) in{' '}
-              {Math.max(0, Math.round((new Date(nextEvent.scheduledAt).getTime() - Date.now()) / 60_000))}m
+              {nextEvent.name} ({nextEvent.currency}) in {minsUntil}m
             </span>
           </div>
         </>

@@ -147,7 +147,9 @@ function detectFairValueGaps(candles: CandleData[]): FairValueGap[] {
 function detectLiquidityLevels(candles: CandleData[]): LiquidityLevel[] {
   const levels: LiquidityLevel[] = []
   const recent = candles.slice(-50)
-  const TOLERANCE = 0.10
+  // Gold tick size = $0.01; 0.10 (1 tick) was too tight.
+  // 0.30 catches meaningful equal-level clusters for H1 gold without false positives.
+  const TOLERANCE = 0.30
 
   for (let i = 0; i < recent.length - 2; i++) {
     for (let j = i + 2; j < recent.length; j++) {
@@ -155,13 +157,15 @@ function detectLiquidityLevels(candles: CandleData[]): LiquidityLevel[] {
         const price = (recent[i].high + recent[j].high) / 2
         if (levels.some(l => Math.abs(l.price - price) < TOLERANCE)) continue
         const isSwept = recent.slice(j + 1).some(c => c.high > recent[j].high + TOLERANCE)
-        levels.push({ price, isSwept, isBullishSweep: false, description: 'Equal Highs (BSL)' })
+        // Sweeping above equal highs (BSL) = bullish breakout
+        levels.push({ price, isSwept, isBullishSweep: isSwept, description: 'Equal Highs (BSL)' })
       }
       if (Math.abs(recent[i].low - recent[j].low) <= TOLERANCE) {
         const price = (recent[i].low + recent[j].low) / 2
         if (levels.some(l => Math.abs(l.price - price) < TOLERANCE)) continue
         const isSwept = recent.slice(j + 1).some(c => c.low < recent[j].low - TOLERANCE)
-        levels.push({ price, isSwept, isBullishSweep: isSwept, description: 'Equal Lows (SSL)' })
+        // Sweeping below equal lows (SSL) = bearish — never a bullish sweep
+        levels.push({ price, isSwept, isBullishSweep: false, description: 'Equal Lows (SSL)' })
       }
     }
   }

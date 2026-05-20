@@ -33,7 +33,6 @@ export default function CorrelationPanel() {
           changeLabel={dxyChange >= 0 ? `+${dxyChange.toFixed(3)}` : dxyChange.toFixed(3)}
           goldImpact={dxyChange > 0.1 ? 'bearish' : dxyChange < -0.1 ? 'bullish' : 'neutral'}
           goldImpactLabel={dxyChange > 0.1 ? 'Bearish Gold' : dxyChange < -0.1 ? 'Bullish Gold' : 'Neutral'}
-          invertGoldSignal
         />
 
         <CorrelationRow
@@ -83,7 +82,6 @@ function CorrelationRow({
   changeLabel: string
   goldImpact: GoldImpact
   goldImpactLabel: string
-  invertGoldSignal?: boolean
 }) {
   const impactColor: Record<GoldImpact, string> = {
     bullish: 'text-emerald-400',
@@ -103,7 +101,10 @@ function CorrelationRow({
         <div className="flex items-center gap-1 text-[11px]">
           <span className="text-zinc-300 font-mono">{value}</span>
           {changeLabel && (
-            <span className={cn('font-mono', change >= 0 ? 'text-zinc-400' : 'text-zinc-400')}>
+            <span className={cn(
+              'font-mono',
+              change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-zinc-400'
+            )}>
               {changeLabel}
             </span>
           )}

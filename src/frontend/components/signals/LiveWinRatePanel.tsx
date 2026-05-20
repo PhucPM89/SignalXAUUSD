@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import { cn } from '@/lib/utils'
 import { TrendingUp, TrendingDown, RefreshCw, Zap } from 'lucide-react'
@@ -103,19 +103,21 @@ export default function LiveWinRatePanel() {
 
   const { buy, sell, context } = data
 
-  // Merge buy+sell factors, deduplicate by key, pick highest absolute impact
-  const allFactors = [
-    ...buy.factors.map(f => ({ ...f, dir: 'buy' })),
-    ...sell.factors.map(f => ({ ...f, dir: 'sell' })),
-  ]
-  const factorMap = new Map<string, typeof allFactors[0]>()
-  for (const f of allFactors) {
-    const prev = factorMap.get(f.key)
-    if (!prev || Math.abs(f.impact_pct) > Math.abs(prev.impact_pct)) factorMap.set(f.key, f)
-  }
-  const topFactors = [...factorMap.values()]
-    .sort((a, b) => Math.abs(b.impact_pct) - Math.abs(a.impact_pct))
-    .slice(0, 5)
+  // Memoized: only recompute when buy/sell factors actually change
+  const topFactors = useMemo(() => {
+    const all = [
+      ...buy.factors.map(f => ({ ...f, dir: 'buy' })),
+      ...sell.factors.map(f => ({ ...f, dir: 'sell' })),
+    ]
+    const map = new Map<string, typeof all[0]>()
+    for (const f of all) {
+      const prev = map.get(f.key)
+      if (!prev || Math.abs(f.impact_pct) > Math.abs(prev.impact_pct)) map.set(f.key, f)
+    }
+    return [...map.values()]
+      .sort((a, b) => Math.abs(b.impact_pct) - Math.abs(a.impact_pct))
+      .slice(0, 5)
+  }, [buy.factors, sell.factors])
 
   const buyTier  = TIER[buy.tier]  ?? TIER.LOW
   const sellTier = TIER[sell.tier] ?? TIER.LOW

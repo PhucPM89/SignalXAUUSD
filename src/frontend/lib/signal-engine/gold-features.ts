@@ -70,7 +70,7 @@ export function extractFeatures(
     chochPresent: htf.changeOfCharacter ? 1 : 0,
     unmitigatedObPresent: 0, obProximityScore: 0,
     fvgPresent: 0, fvgProximityScore: 0,
-    liquiditySweepRecent: 0, bslDistancePips: 5000, sslDistancePips: 5000, liquidityImbalance: 0,
+    liquiditySweepRecent: 0, bslDistancePips: 0, sslDistancePips: 0, liquidityImbalance: 0,
     dxyMomentum: 0, yieldMomentum: 0, vixLevel: 20, riskOffScore: 0, goldCorrelationScore: 0.33,
     atrRatio: 1, adrPct: 0.5, volatilityRegime: 0.5, rangePosition: 0.5,
     sessionLondon: 0, sessionNy: 0, sessionOverlap: 0, sessionDead: 0,
