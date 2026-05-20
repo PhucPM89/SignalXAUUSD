@@ -3,7 +3,8 @@
  * and C# GenerateSignalCommand.cs. Outputs the Signal type consumed by the frontend.
  */
 import { randomUUID } from 'crypto'
-import { fetchCandles, fetchCorrelations, type CandleData, type CorrelationSnapshot } from '@/lib/market-data'
+import { type CandleData, type CorrelationSnapshot } from '@/lib/market-data'
+import { getCachedCandles, getCachedCorrelations } from '@/lib/data-cache'
 import {
   analyzeMarketStructure, calculateVolatility, determineSession, determineRegime,
   structureScore, type MarketStructure,
@@ -18,9 +19,9 @@ const PIP = 0.01
 export async function generateSignal(): Promise<Signal | null> {
   // 1. Fetch market data in parallel
   const [h1Candles, h4Candles, correlations] = await Promise.all([
-    fetchCandles('XAUUSD', 'H1', 200),
-    fetchCandles('XAUUSD', 'H4', 50),
-    fetchCorrelations(),
+    getCachedCandles('XAUUSD', 'H1', 100),
+    getCachedCandles('XAUUSD', 'H4', 50),
+    getCachedCorrelations(),
   ])
 
   if (h1Candles.length < 20) return null

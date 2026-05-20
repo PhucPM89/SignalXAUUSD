@@ -9,14 +9,23 @@ const YAHOO_SYMBOLS: Record<string, string> = {
   SPX:    '^GSPC',
 }
 
-function toYahooParams(tf: string): { interval: string; range: string } {
+function toYahooParams(tf: string, count: number): { interval: string; range: string } {
   switch (tf) {
     case 'M5':  return { interval: '5m',  range: '5d'   }
     case 'M15': return { interval: '15m', range: '14d'  }
     case 'M30': return { interval: '30m', range: '14d'  }
-    case 'H4':  return { interval: '1h',  range: '180d' }
+    case 'H4': {
+      // H4 downloads 1h bars then filters every 4h — need count×4h of 1h data + 50% buffer.
+      // Previously hardcoded 180d (4320 candles) regardless of count — now dynamic.
+      const days = Math.max(10, Math.min(180, Math.ceil(count * 4 / 24 * 1.5)))
+      return { interval: '1h', range: `${days}d` }
+    }
     case 'D1':  return { interval: '1d',  range: '2y'   }
-    default:    return { interval: '1h',  range: '30d'  }  // H1
+    default: {
+      // H1: add 50% buffer for weekends/gaps, cap at 60d
+      const days = Math.max(5, Math.min(60, Math.ceil(count / 24 * 1.5)))
+      return { interval: '1h', range: `${days}d` }
+    }
   }
 }
 
@@ -35,11 +44,13 @@ export async function fetchCandles(
   count: number,
 ): Promise<CandleData[]> {
   const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
-  const { interval, range } = toYahooParams(timeframe)
+  const { interval, range } = toYahooParams(timeframe, count)
   const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=${interval}&range=${range}`
 
   try {
-    const res = await fetch(url, { next: { revalidate: 30 } })
+    const ac  = new AbortController()
+    const tid = setTimeout(() => ac.abort(), 5_000)
+    const res = await fetch(url, { next: { revalidate: 30 }, signal: ac.signal }).finally(() => clearTimeout(tid))
     if (!res.ok) throw new Error(`Yahoo ${res.status}`)
     const data = await res.json()
     const result = data?.chart?.result?.[0]
@@ -118,10 +129,12 @@ export async function fetchTickData(symbol: string): Promise<TickData> {
 
   // Primary: v7 quote endpoint — returns only current price metadata, no OHLCV array
   try {
+    const ac1  = new AbortController()
+    const tid1 = setTimeout(() => ac1.abort(), 3_000)
     const res   = await fetch(
       `${YAHOO_BASE}/v7/finance/quote?symbols=${encodeURIComponent(yahooSym)}`,
-      { cache: 'no-store' }
-    )
+      { cache: 'no-store', signal: ac1.signal }
+    ).finally(() => clearTimeout(tid1))
     const data  = await res.json()
     const quote = data?.quoteResponse?.result?.[0]
     const price = (quote?.regularMarketPrice as number) ?? 0
@@ -137,10 +150,12 @@ export async function fetchTickData(symbol: string): Promise<TickData> {
 
   // Fallback: chart endpoint with minimal 5-minute range
   try {
+    const ac2  = new AbortController()
+    const tid2 = setTimeout(() => ac2.abort(), 3_000)
     const res       = await fetch(
       `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=5m`,
-      { cache: 'no-store' }
-    )
+      { cache: 'no-store', signal: ac2.signal }
+    ).finally(() => clearTimeout(tid2))
     const data      = await res.json()
     const meta      = data?.chart?.result?.[0]?.meta
     const price     = (meta?.regularMarketPrice as number) ?? 0
@@ -171,10 +186,12 @@ export interface CorrelationSnapshot {
 
 async function fetchSymbolHourly(sym: string) {
   try {
+    const ac  = new AbortController()
+    const tid = setTimeout(() => ac.abort(), 4_000)
     const res = await fetch(
-      `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=2d`,
-      { next: { revalidate: 60 } }
-    )
+      `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=1d`,
+      { next: { revalidate: 60 }, signal: ac.signal }
+    ).finally(() => clearTimeout(tid))
     const data  = await res.json()
     const result = data?.chart?.result?.[0]
     const meta   = result?.meta

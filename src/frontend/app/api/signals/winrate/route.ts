@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { fetchCandles, fetchCorrelations, fetchGoldNews } from '@/lib/market-data'
+import { fetchGoldNews } from '@/lib/market-data'
+import { getCachedCandles, getCachedCorrelations } from '@/lib/data-cache'
 import {
   analyzeMarketStructure, calculateVolatility, determineSession, determineRegime,
   structureScore,
@@ -41,9 +42,9 @@ export async function GET() {
 
   try {
     const [h1Candles, h4Candles, correlations, newsAlerts] = await Promise.all([
-      fetchCandles('XAUUSD', 'H1', 100),
-      fetchCandles('XAUUSD', 'H4', 50),
-      fetchCorrelations(),
+      getCachedCandles('XAUUSD', 'H1', 100),
+      getCachedCandles('XAUUSD', 'H4', 50),
+      getCachedCorrelations(),
       fetchGoldNews().catch(() => [] as Awaited<ReturnType<typeof fetchGoldNews>>),
     ])
 
