@@ -86,6 +86,23 @@ export default function LiveWinRatePanel() {
     prevHighCount.current = highCount
   }, [newsAlerts, loadData])
 
+  // Must be before any early return — hooks cannot be called conditionally
+  const topFactors = useMemo(() => {
+    if (!data) return []
+    const all = [
+      ...data.buy.factors.map(f => ({ ...f, dir: 'buy' })),
+      ...data.sell.factors.map(f => ({ ...f, dir: 'sell' })),
+    ]
+    const map = new Map<string, typeof all[0]>()
+    for (const f of all) {
+      const prev = map.get(f.key)
+      if (!prev || Math.abs(f.impact_pct) > Math.abs(prev.impact_pct)) map.set(f.key, f)
+    }
+    return [...map.values()]
+      .sort((a, b) => Math.abs(b.impact_pct) - Math.abs(a.impact_pct))
+      .slice(0, 5)
+  }, [data])
+
   if (!data) {
     return (
       <div className="bg-zinc-900/80 rounded-lg border border-zinc-800 p-3 animate-pulse space-y-2">
@@ -102,22 +119,6 @@ export default function LiveWinRatePanel() {
   }
 
   const { buy, sell, context } = data
-
-  // Memoized: only recompute when buy/sell factors actually change
-  const topFactors = useMemo(() => {
-    const all = [
-      ...buy.factors.map(f => ({ ...f, dir: 'buy' })),
-      ...sell.factors.map(f => ({ ...f, dir: 'sell' })),
-    ]
-    const map = new Map<string, typeof all[0]>()
-    for (const f of all) {
-      const prev = map.get(f.key)
-      if (!prev || Math.abs(f.impact_pct) > Math.abs(prev.impact_pct)) map.set(f.key, f)
-    }
-    return [...map.values()]
-      .sort((a, b) => Math.abs(b.impact_pct) - Math.abs(a.impact_pct))
-      .slice(0, 5)
-  }, [buy.factors, sell.factors])
 
   const buyTier  = TIER[buy.tier]  ?? TIER.LOW
   const sellTier = TIER[sell.tier] ?? TIER.LOW
