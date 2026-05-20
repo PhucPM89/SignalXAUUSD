@@ -1,5 +1,52 @@
 // ── Core XAUUSD Trading Types ─────────────────────────────────────────────────
 
+export interface OrderBlockZone {
+  formedAtTs: number    // Unix timestamp (seconds) — for time-based chart rect
+  top: number
+  bottom: number
+  isBullish: boolean    // matches C# IsBullish → JSON isBullish
+  mitigated: boolean
+  strength: number      // 0–100
+}
+
+export interface FVGZone {
+  formedAtTs: number
+  upper: number
+  lower: number
+  isBullish: boolean
+  filled: boolean
+  sizePips: number
+}
+
+export interface LiquidityLevel {
+  price: number
+  swept: boolean
+  bullishSweep: boolean
+  description: string   // e.g. "Equal Highs (BSL)"
+}
+
+export interface ChartOverlays {
+  orderBlocks: OrderBlockZone[]
+  fvgZones: FVGZone[]
+  liquidityLevels: LiquidityLevel[]
+  bosPresent: boolean
+  chochPresent: boolean
+  htfBullish: boolean
+  swingHigh: number
+  swingLow: number
+}
+
+export interface LayerScores {
+  structure: number   // –1 to +1
+  liquidity: number   // –1 to +1
+  macro: number       // –1 to +1
+  volatility: number  // 0 to 1
+  session: number     // 0 to 1
+  news: number        // 0 to 1
+}
+
+
+
 export type SignalDirection = 'BUY' | 'SELL' | 'NOTRADE'
 export type SignalStrength = 'Weak' | 'Moderate' | 'Strong' | 'Institutional'
 export type MarketRegime =
@@ -81,6 +128,8 @@ export interface Signal {
   correlations: Correlations
   volatility: Volatility
   winRate?: WinRate
+  chartOverlays?: ChartOverlays
+  layerScores?: LayerScores
   generatedAt: string
   expiresAt: string
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useSignalR } from '@/hooks/useSignalR'
+import { useLiveData } from '@/hooks/useLiveData'
 import { useTradingStore } from '@/stores/tradingStore'
 import StatusBar from '@/components/layout/StatusBar'
 import GoldChart from '@/components/charts/GoldChart'
@@ -27,13 +27,11 @@ import { Activity, BarChart2 } from 'lucide-react'
  * No prop drilling — state flows: SignalR → store → components.
  */
 export default function DashboardPage() {
-  const { activeSignal, signalHistory, currentRegime, isConnected, hasHighImpactEventSoon } = useTradingStore()
+  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon } = useTradingStore()
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
 
-  useSignalR()
-
-  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000'
+  useLiveData()
 
   useEffect(() => {
     fetchCandles('H1')
@@ -41,15 +39,13 @@ export default function DashboardPage() {
 
   async function fetchCandles(timeframe: string) {
     try {
-      const res = await fetch(`${apiBase}/api/v1/market/candles/XAUUSD?timeframe=${timeframe}&count=200`)
+      const res = await fetch(`/api/market/candles?timeframe=${timeframe}&count=200`)
       if (res.ok) {
         const data: Candle[] = await res.json()
         setCandles(data)
-      } else {
-        console.error('Candles fetch failed:', res.status, await res.text())
       }
-    } catch (e) {
-      console.error('Candles fetch error:', e)
+    } catch {
+      // non-fatal — chart renders with empty state
     }
   }
 

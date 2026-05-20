@@ -1,7 +1,0 @@
-# Root railway.toml — intentionally empty.
-# Each service has its own railway.toml in its subdirectory.
-# In Railway UI: create 4 services, set Root Directory for each:
-#   signal-api      → src/backend
-#   signal-engine   → src/ai-services/signal-engine
-#   regime-detector → src/ai-services/regime-detector
-#   frontend        → src/frontend
