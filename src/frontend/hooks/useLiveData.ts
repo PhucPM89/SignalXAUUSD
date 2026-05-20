@@ -22,12 +22,28 @@ function deriveSession(): SessionType {
   return 'OffSession'
 }
 
+const PRESENCE_INTERVAL_MS = 30_000
+
+function getSessionId(): string {
+  try {
+    const key = '__signal_sid'
+    let id = sessionStorage.getItem(key)
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36)
+      sessionStorage.setItem(key, id)
+    }
+    return id
+  } catch {
+    return Math.random().toString(36).slice(2)
+  }
+}
+
 export function useLiveData() {
   const {
     setTick, addSignalToHistory, setRegime, closeActiveSignal,
     updateCorrelations, setConnectionStatus,
     setNewsAlerts, setEconomicEvents, setSession,
-    updateSignalSL,
+    updateSignalSL, setOnlineUsers,
   } = useTradingStore()
 
   const timers = useRef<ReturnType<typeof setInterval>[]>([])
@@ -120,6 +136,21 @@ export function useLiveData() {
     setSession(deriveSession())
   }
 
+  async function pingPresence() {
+    try {
+      const res = await fetch('/api/presence', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: getSessionId() }),
+        cache: 'no-store',
+      })
+      if (res.ok) {
+        const { online } = await res.json()
+        setOnlineUsers(online)
+      }
+    } catch { /* non-blocking */ }
+  }
+
   function checkSignalManagement() {
     const { activeSignal, currentPrice, signalPhase } = useTradingStore.getState()
     if (!activeSignal || activeSignal.direction === 'NOTRADE') return
@@ -185,6 +216,7 @@ export function useLiveData() {
     pollNews()
     pollEvents()
     syncSession()
+    pingPresence()
 
     timers.current = [
       setInterval(pollTick,              TICK_INTERVAL_MS),
@@ -194,6 +226,7 @@ export function useLiveData() {
       setInterval(pollNews,              NEWS_INTERVAL_MS),
       setInterval(pollEvents,            EVENTS_INTERVAL_MS),
       setInterval(syncSession,           SESSION_INTERVAL_MS),
+      setInterval(pingPresence,          PRESENCE_INTERVAL_MS),
     ]
 
     return () => {

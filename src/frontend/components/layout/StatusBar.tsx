@@ -21,9 +21,10 @@ function useStatusBarStore() {
   const hasHighImpact     = useTradingStore(s => s.hasHighImpactEventSoon)
   const upcomingEvents    = useTradingStore(s => s.upcomingEvents)
   const lastTickAt        = useTradingStore(s => s.lastTickAt)
+  const onlineUsers       = useTradingStore(s => s.onlineUsers)
   return { currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
     currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt }
+    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers }
 }
 
 // Live clock — starts at 0 (stable server/client hydration), updates after mount
@@ -41,7 +42,7 @@ export default function StatusBar() {
   const {
     currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
     currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt,
+    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers,
   } = useStatusBarStore()
 
   const now = useNow()
@@ -126,11 +127,23 @@ export default function StatusBar() {
 
       <div className="flex-1" />
 
+      {/* Online users counter */}
+      {onlineUsers > 0 && (
+        <div className="flex items-center gap-1 text-[10px]">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-zinc-400 font-mono font-semibold">{onlineUsers}</span>
+          <span className="hidden sm:inline text-zinc-600">online</span>
+        </div>
+      )}
+
       {/* Last tick — hidden on mobile */}
       {lastTickAt && (
-        <span className="hidden sm:block text-zinc-600 text-[10px] font-mono">
-          {new Date(lastTickAt).toLocaleTimeString('en-US', { hour12: false })} UTC
-        </span>
+        <>
+          <div className="hidden sm:block"><Divider /></div>
+          <span className="hidden sm:block text-zinc-600 text-[10px] font-mono">
+            {new Date(lastTickAt).toLocaleTimeString('en-US', { hour12: false })} UTC
+          </span>
+        </>
       )}
     </div>
   )

@@ -44,6 +44,7 @@ interface TradingState {
   isConnected: boolean
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
   isDarkMode: boolean
+  onlineUsers: number
 
   // Actions
   setTick: (tick: Tick) => void
@@ -60,6 +61,7 @@ interface TradingState {
   setConnectionStatus: (status: TradingState['connectionStatus']) => void
   setTimeframe: (tf: string) => void
   toggleDarkMode: () => void
+  setOnlineUsers: (n: number) => void
 }
 
 export const useTradingStore = create<TradingState>()(
@@ -92,6 +94,7 @@ export const useTradingStore = create<TradingState>()(
       isConnected: false,
       connectionStatus: 'disconnected',
       isDarkMode: true,
+      onlineUsers: 0,
 
       setTick: (tick) => set({
         currentPrice:   tick.mid,
@@ -183,6 +186,7 @@ export const useTradingStore = create<TradingState>()(
 
       setTimeframe:   (tf) => set({ selectedTimeframe: tf }),
       toggleDarkMode: () => set((s) => ({ isDarkMode: !s.isDarkMode })),
+      setOnlineUsers: (n) => set({ onlineUsers: n }),
     })),
     { name: 'XAUUSDTradingStore' }
   )
