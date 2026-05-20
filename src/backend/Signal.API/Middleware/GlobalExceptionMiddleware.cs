@@ -53,7 +53,8 @@ public sealed class RequestTimingMiddleware(RequestDelegate next, ILogger<Reques
         await next(ctx);
         sw.Stop();
 
-        ctx.Response.Headers["X-Response-Time"] = $"{sw.ElapsedMilliseconds}ms";
+        if (!ctx.Response.HasStarted)
+            ctx.Response.Headers["X-Response-Time"] = $"{sw.ElapsedMilliseconds}ms";
 
         if (sw.ElapsedMilliseconds > 500)
             logger.LogWarning("Slow request: {Method} {Path} took {Ms}ms",

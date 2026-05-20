@@ -32,7 +32,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddResponseCompression(opts => opts.EnableForHttps = true);
 builder.Services.AddCors(opts =>
     opts.AddPolicy("TradingFrontend", p =>
-        p.WithOrigins(builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
+        p.SetIsOriginAllowed(_ => true)
          .AllowAnyHeader()
          .AllowAnyMethod()
          .AllowCredentials()));
