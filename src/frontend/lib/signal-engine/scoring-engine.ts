@@ -53,7 +53,7 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
 
   const bullScore = directionalScore(features, true)
   const bearScore = directionalScore(features, false)
-  if (Math.abs(bullScore - bearScore) < 0.15)
+  if (Math.abs(bullScore - bearScore) < 0.05)
     return noTrade('Insufficient directional conviction — market ambiguous', warnings)
 
   const direction: 'Buy' | 'Sell' = bullScore > bearScore ? 'Buy' : 'Sell'
@@ -164,17 +164,28 @@ function scoreNews(f: GoldFeatures, warnings: string[]): number {
 }
 
 function directionalScore(f: GoldFeatures, buy: boolean): number {
-  const s = buy ? 1 : -1
-  const vals = [
-    f.htfBullish * s,
-    f.dxyMomentum * s,
-    f.yieldMomentum * s,
-    buy ? f.riskOffScore : 0,
-    buy ? f.goldCorrelationScore : (1 - f.goldCorrelationScore),
-    f.newsSentimentScore * s,
-    f.liquiditySweepRecent > 0.5 && f.htfBullish * s > 0 ? 1 : 0,
-  ]
-  return vals.reduce((sum, v) => sum + Math.max(0, v), 0) / vals.length
+  // Neutral factors score 0 — only count active evidence, divide by 7 for both sides
+  if (buy) {
+    return ([
+      Math.max(0,  f.htfBullish),             // bullish H1 structure
+      Math.max(0,  f.dxyMomentum),            // DXY weakening → gold up
+      Math.max(0,  f.yieldMomentum),          // yields declining → gold up
+      f.riskOffScore,                         // risk-off (VIX spike, SPX sell-off)
+      f.goldCorrelationScore,                 // composite macro alignment
+      Math.max(0,  f.newsSentimentScore),     // positive gold news
+      f.liquiditySweepRecent > 0.5 && f.htfBullish > 0 ? 1 : 0,
+    ] as number[]).reduce((s, v) => s + v, 0) / 7
+  } else {
+    return ([
+      Math.max(0, -f.htfBullish),             // bearish H1 structure
+      Math.max(0, -f.dxyMomentum),            // DXY strengthening → gold down
+      Math.max(0, -f.yieldMomentum),          // yields rising → gold down
+      0,                                      // no symmetric risk-on metric
+      0,                                      // no symmetric gold correlation metric
+      Math.max(0, -f.newsSentimentScore),     // negative gold news
+      f.liquiditySweepRecent > 0.5 && f.htfBullish < 0 ? 1 : 0,
+    ] as number[]).reduce((s, v) => s + v, 0) / 7
+  }
 }
 
 function riskParams(f: GoldFeatures, confidence: number) {
