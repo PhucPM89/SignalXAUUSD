@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   createChart, IChartApi, ISeriesApi,
   CandlestickSeries,
@@ -77,7 +77,6 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
   const markersRef   = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
 
   const { currentPrice, selectedTimeframe, setTimeframe } = useTradingStore()
-  const [crosshairPrice, setCrosshairPrice] = useState<number | null>(null)
 
   // ── 1. Chart initialisation ────────────────────────────────────────────────
   useEffect(() => {
@@ -134,12 +133,7 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     obPrimRef.current  = obPrim
     fvgPrimRef.current = fvgPrim
 
-    chart.subscribeCrosshairMove(param => {
-      // Only track crosshair price for displaying OHLC tooltip — NOT used in toolbar
-      if (!param.point) { setCrosshairPrice(null); return }
-      const d = param.seriesData.get(series) as CandlestickData | undefined
-      setCrosshairPrice(d?.close ?? null)
-    })
+    // Crosshair price is shown natively on the chart Y-axis — no custom tracking needed
 
     return () => {
       chart.remove()
@@ -385,20 +379,13 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
             <span className="text-white font-bold text-sm tracking-wider font-mono">XAU/USD</span>
           </div>
 
-          {/* Always show live price — crosshair price appears natively on the Y-axis */}
+          {/* Live price — crosshair price is shown natively on the Y-axis */}
           <span className={cn(
             'text-lg font-mono font-semibold tabular-nums',
             currentPrice > 0 ? 'text-white' : 'text-zinc-600'
           )}>
             {currentPrice > 0 ? formatGold(currentPrice) : '———'}
           </span>
-
-          {/* Crosshair candle price (shown only when hovering a historical bar) */}
-          {crosshairPrice !== null && crosshairPrice !== currentPrice && (
-            <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
-              bar {formatGold(crosshairPrice)}
-            </span>
-          )}
 
           {/* Market structure badges */}
           {signal?.chartOverlays && (
