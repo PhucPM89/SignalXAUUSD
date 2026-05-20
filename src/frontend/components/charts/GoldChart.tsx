@@ -45,6 +45,7 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     if (!chartContainerRef.current) return
 
     const chart = createChart(chartContainerRef.current, {
+      autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: '#0f0f14' },
         textColor: '#9ca3af',
@@ -69,8 +70,6 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
         timeVisible: true,
         secondsVisible: false,
       },
-      width: chartContainerRef.current.clientWidth,
-      height: chartContainerRef.current.clientHeight,
     })
 
     chartRef.current = chart
@@ -93,19 +92,7 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
       }
     })
 
-    // Resize observer
-    const resizeObserver = new ResizeObserver(() => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({
-          width: chartContainerRef.current.clientWidth,
-          height: chartContainerRef.current.clientHeight,
-        })
-      }
-    })
-    resizeObserver.observe(chartContainerRef.current)
-
     return () => {
-      resizeObserver.disconnect()
       chart.remove()
       chartRef.current = null
     }
