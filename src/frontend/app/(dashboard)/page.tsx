@@ -98,21 +98,22 @@ export default function DashboardPage() {
             )} />
           </div>
 
-          {/* No-trade state — important UX signal */}
-          {!activeSignal && (
+          {/* No-trade state */}
+          {(!activeSignal || activeSignal.direction === 'NOTRADE') && (
             <div className="mx-3 mt-3 bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-4 text-center">
               <div className="text-2xl mb-1">—</div>
               <p className="text-[11px] text-zinc-400 font-semibold">NO TRADE</p>
               <p className="text-[10px] text-zinc-600 mt-1">
                 {hasHighImpactEventSoon
                   ? 'High-impact event imminent — standing aside'
-                  : 'Waiting for institutional-grade setup'}
+                  : activeSignal?.reasoning?.htfBias
+                    || 'Waiting for institutional-grade setup'}
               </p>
             </div>
           )}
 
-          {/* Active signal */}
-          {activeSignal && (
+          {/* Active BUY / SELL signal */}
+          {activeSignal && activeSignal.direction !== 'NOTRADE' && (
             <div className="px-3 pt-3">
               <SignalCard
                 signal={activeSignal}

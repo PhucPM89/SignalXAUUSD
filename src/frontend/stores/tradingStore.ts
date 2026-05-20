@@ -97,13 +97,16 @@ export const useTradingStore = create<TradingState>()(
 
       setActiveSignal: (signal) => set({ activeSignal: signal }),
 
-      addSignalToHistory: (signal) => set((s) => ({
-        signalHistory:  [signal, ...s.signalHistory].slice(0, 100),
-        signalCount:    s.signalCount + 1,
-        activeSignal:   signal,
-        currentSession: signal.session ?? s.currentSession,
-        currentRegime:  signal.regime  ?? s.currentRegime,
-      })),
+      addSignalToHistory: (signal) => set((s) => {
+        const isTradeable = signal.direction === 'BUY' || signal.direction === 'SELL'
+        return {
+          signalHistory:  isTradeable ? [signal, ...s.signalHistory].slice(0, 100) : s.signalHistory,
+          signalCount:    isTradeable ? s.signalCount + 1 : s.signalCount,
+          activeSignal:   signal,
+          currentSession: signal.session ?? s.currentSession,
+          currentRegime:  signal.regime  ?? s.currentRegime,
+        }
+      }),
 
       setRegime: (regime) => set({
         currentRegime:        regime,

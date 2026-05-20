@@ -3,7 +3,7 @@
  * and C# GenerateSignalCommand.cs. Outputs the Signal type consumed by the frontend.
  */
 import { randomUUID } from 'crypto'
-import { fetchCandles, fetchCorrelations, type CandleData } from '@/lib/market-data'
+import { fetchCandles, fetchCorrelations, type CandleData, type CorrelationSnapshot } from '@/lib/market-data'
 import {
   analyzeMarketStructure, calculateVolatility, determineSession, determineRegime,
   structureScore, type MarketStructure,
@@ -27,43 +27,57 @@ export async function generateSignal(): Promise<Signal | null> {
 
   const currentPrice = h1Candles[h1Candles.length - 1].close
 
-  // 2. Market structure analysis (HTF = H1, LTF = H4 bars treated as reference)
+  // 2. Market structure (always run — needed for chart overlays)
   const htfStructure = analyzeMarketStructure(h1Candles)
   const ltfStructure = analyzeMarketStructure(h4Candles.length >= 20 ? h4Candles : h1Candles.slice(-50))
   const htfScore = structureScore(htfStructure)
   const ltfScore = structureScore(ltfStructure)
 
-  // 3. Volatility
-  const volatility = calculateVolatility(h1Candles, h4Candles)
+  // 3. Volatility + session + regime
+  const volatility   = calculateVolatility(h1Candles, h4Candles)
+  const session      = determineSession()
+  const regime       = determineRegime(volatility, correlations, htfStructure)
 
-  // 4. Session + regime
-  const session = determineSession()
-  const regime  = determineRegime(volatility, correlations, htfStructure)
+  // Always build chart overlays so the chart shows OB/FVG zones regardless of signal quality
+  const chartOverlays = buildChartOverlays(htfStructure)
 
-  // Suppress during dead sessions or extreme conditions
-  if (session === 'Sydney' || session === 'Tokyo') return null
-  if (regime === 'Compression' && !volatility.isExpanding) return null
+  // Helper: return NOTRADE signal that still carries chart overlays
+  const noTrade = (reason: string) =>
+    makeNoTrade(currentPrice, session, regime, volatility, correlations, chartOverlays, reason)
 
-  // 5. Feature extraction
+  // 4. Session gate — only suppress true dead hours (Sydney = 22:00–02:00 UTC)
+  //    Tokyo (02:00–08:00 UTC) is lower quality but Gold IS tradeable — let scoring decide
+  if (session === 'Sydney') {
+    return noTrade('Sydney / dead session — Gold liquidity minimal')
+  }
+
+  // 5. Compression gate
+  if (regime === 'Compression' && !volatility.isExpanding) {
+    return noTrade('Market in compression — waiting for breakout expansion')
+  }
+
+  // 6. Feature extraction
   const features = extractFeatures(
     htfStructure, ltfStructure, htfScore, ltfScore,
     {
-      dxyChange1H:  correlations.dxyChange1H,
+      dxyChange1H:   correlations.dxyChange1H,
       us10YChange1H: correlations.us10YChange1H,
-      vix: correlations.vix,
-      spxChange1D: correlations.spxChange1D,
-      isRiskOff: correlations.isRiskOff,
+      vix:           correlations.vix,
+      spxChange1D:   correlations.spxChange1D,
+      isRiskOff:     correlations.isRiskOff,
     },
     volatility,
     h1Candles,
   )
 
-  // 6. Scoring
+  // 7. Scoring
   const scoring = scoreSignal(features, currentPrice)
-  if (scoring.direction === 'NoTrade') return null
+  if (scoring.direction === 'NoTrade') {
+    return noTrade(scoring.noTradeReason ?? 'No institutional-grade setup detected')
+  }
 
-  // 7. Price computation
-  const direction = scoring.direction
+  // 8. Price computation
+  const direction  = scoring.direction
   const offsetPrice = scoring.entryOffsetPips * PIP
   let entryPrice: number, stopLoss: number, takeProfit: number
 
@@ -82,41 +96,38 @@ export async function generateSignal(): Promise<Signal | null> {
   takeProfit = round2(takeProfit)
 
   const rrRatio = scoring.tpPips / Math.max(scoring.slPips, 1)
-  if (rrRatio < 1.8) return null
+  if (rrRatio < 1.8) return noTrade(`RR ${rrRatio.toFixed(1)} below minimum 1.8`)
 
-  // 8. Bayesian win rate
+  // 9. Bayesian win rate
   const bull = direction === 'Buy'
   const macroAlignedCount = countMacroAligned(features, bull)
   const winRateResult = calculateWinRate({
-    regime: regimeToWinRateKey(regime),
+    regime:           regimeToWinRateKey(regime),
     rrRatio,
-    bosConfirmed:      features.bosPresent > 0.5,
-    chochAgainst:      features.chochPresent > 0.5 && !htfStructure.bullishStructure === bull,
-    obMitigating:      features.obProximityScore > 0.75,
-    obNearby:          features.obProximityScore > 0.4,
-    fvgFilling:        features.fvgProximityScore > 0.75,
-    fvgNearby:         features.fvgProximityScore > 0.4,
-    liquiditySwept:    features.liquiditySweepRecent > 0.5,
-    equalHighsNearby:  htfStructure.liquidityLevels.some(l => !l.isSwept),
-    htfAligned:        (bull && htfStructure.bullishStructure) || (!bull && !htfStructure.bullishStructure),
-    htfOpposing:       (bull && !htfStructure.bullishStructure) || (!bull && htfStructure.bullishStructure),
-    mtfConfluence:     Math.abs(htfScore) > 50,
-    macroAligned:      macroAlignedCount,
-    macroDivergent:    isMacroDivergent(features, bull),
-    session:           sessionToWinRateKey(session),
-    eventHiLt1h:       false,
-    eventHi1to2h:      false,
-    eventMedLt30m:     false,
-    vixExtreme:        features.vixLevel > 35,
-    atrCompression:    features.atrRatio < 0.5,
-    atrExpansion:      features.atrRatio > 1.3,
+    bosConfirmed:     features.bosPresent > 0.5,
+    chochAgainst:     features.chochPresent > 0.5 && !htfStructure.bullishStructure === bull,
+    obMitigating:     features.obProximityScore > 0.75,
+    obNearby:         features.obProximityScore > 0.4,
+    fvgFilling:       features.fvgProximityScore > 0.75,
+    fvgNearby:        features.fvgProximityScore > 0.4,
+    liquiditySwept:   features.liquiditySweepRecent > 0.5,
+    equalHighsNearby: htfStructure.liquidityLevels.some(l => !l.isSwept),
+    htfAligned:       (bull && htfStructure.bullishStructure) || (!bull && !htfStructure.bullishStructure),
+    htfOpposing:      (bull && !htfStructure.bullishStructure) || (!bull && htfStructure.bullishStructure),
+    mtfConfluence:    Math.abs(htfScore) > 50,
+    macroAligned:     macroAlignedCount,
+    macroDivergent:   isMacroDivergent(features, bull),
+    session:          sessionToWinRateKey(session),
+    eventHiLt1h:      false,
+    eventHi1to2h:     false,
+    eventMedLt30m:    false,
+    vixExtreme:       features.vixLevel > 35,
+    atrCompression:   features.atrRatio < 0.5,
+    atrExpansion:     features.atrRatio > 1.3,
   })
 
-  // 9. Build reasoning narrative
+  // 10. Reasoning narrative
   const reasoning = buildReasoning(features, scoring, direction, currentPrice, volatility)
-
-  // 10. Chart overlays from HTF structure
-  const chartOverlays = buildChartOverlays(htfStructure)
 
   // 11. Layer scores
   const layerScores: LayerScores = {
@@ -132,56 +143,121 @@ export async function generateSignal(): Promise<Signal | null> {
   const expectedVal = winProb * (takeProfit - entryPrice) - (1 - winProb) * Math.abs(entryPrice - stopLoss)
   const isInstitutional = scoring.confidence >= 80 && rrRatio >= 2.5
 
-  const now      = new Date()
+  const now       = new Date()
   const expiresAt = new Date(now.getTime() + 4 * 60 * 60 * 1000)
 
   const signal: Signal = {
-    id: randomUUID(),
-    symbol: 'XAUUSD',
-    direction: direction === 'Buy' ? 'BUY' : 'SELL',
-    strength: scoring.confidence >= 85 ? 'Institutional'
-      : scoring.confidence >= 78 ? 'Strong'
-      : scoring.confidence >= 72 ? 'Moderate'
-      : 'Weak',
-    entryPrice: round2(entryPrice),
-    stopLoss:   round2(stopLoss),
-    takeProfit: round2(takeProfit),
-    riskRewardRatio: round2(rrRatio),
-    winProbability: winProb,
-    expectedValue: round2(expectedVal),
-    confidenceScore: scoring.confidence,
-    regime: regime as Signal['regime'],
-    session: session as Signal['session'],
-    macroSentiment: correlations.isRiskOff ? 'Risk-off' : correlations.isRiskOn ? 'Risk-on' : 'Neutral',
-    newsImpact: 'None',
+    id:               randomUUID(),
+    symbol:           'XAUUSD',
+    direction:        direction === 'Buy' ? 'BUY' : 'SELL',
+    strength:         scoring.confidence >= 85 ? 'Institutional'
+                    : scoring.confidence >= 78 ? 'Strong'
+                    : scoring.confidence >= 72 ? 'Moderate'
+                    : 'Weak',
+    entryPrice:       round2(entryPrice),
+    stopLoss:         round2(stopLoss),
+    takeProfit:       round2(takeProfit),
+    riskRewardRatio:  round2(rrRatio),
+    winProbability:   winProb,
+    expectedValue:    round2(expectedVal),
+    confidenceScore:  scoring.confidence,
+    regime:           regime as Signal['regime'],
+    session:          session as Signal['session'],
+    macroSentiment:   correlations.isRiskOff ? 'Risk-off' : correlations.isRiskOn ? 'Risk-on' : 'Neutral',
+    newsImpact:       'None',
     isInstitutionalGrade: isInstitutional,
     reasoning,
     correlations: {
-      dxyValue:     correlations.dxyValue,
-      dxyChange1H:  correlations.dxyChange1H,
-      us10YYield:   correlations.us10YYield,
+      dxyValue:      correlations.dxyValue,
+      dxyChange1H:   correlations.dxyChange1H,
+      us10YYield:    correlations.us10YYield,
       us10YChange1H: correlations.us10YChange1H,
-      vix:          correlations.vix,
-      spxChange1D:  correlations.spxChange1D,
-      isRiskOff:    correlations.isRiskOff,
-      isRiskOn:     correlations.isRiskOn,
+      vix:           correlations.vix,
+      spxChange1D:   correlations.spxChange1D,
+      isRiskOff:     correlations.isRiskOff,
+      isRiskOn:      correlations.isRiskOn,
     },
     volatility: {
-      atr1H:       volatility.atr1H,
-      atr4H:       volatility.atr4H,
-      adrPercent:  volatility.adrPercent,
-      isExpanding: volatility.isExpanding,
+      atr1H:         volatility.atr1H,
+      atr4H:         volatility.atr4H,
+      adrPercent:    volatility.adrPercent,
+      isExpanding:   volatility.isExpanding,
       isContracting: volatility.isContracting,
-      regime:      volatility.regime,
+      regime:        volatility.regime,
     },
-    winRate: winRateResult,
+    winRate:      winRateResult,
     chartOverlays,
     layerScores,
-    generatedAt: now.toISOString(),
-    expiresAt:   expiresAt.toISOString(),
+    generatedAt:  now.toISOString(),
+    expiresAt:    expiresAt.toISOString(),
   }
 
   return signal
+}
+
+// ── NOTRADE signal (carries chart overlays for chart display) ─────────────────
+
+function makeNoTrade(
+  price:        number,
+  session:      string,
+  regime:       string,
+  vol:          ReturnType<typeof calculateVolatility>,
+  corr:         CorrelationSnapshot,
+  overlays:     ChartOverlays,
+  reason:       string,
+): Signal {
+  return {
+    id:               randomUUID(),
+    symbol:           'XAUUSD',
+    direction:        'NOTRADE',
+    strength:         'Weak',
+    entryPrice:       price,
+    stopLoss:         0,
+    takeProfit:       0,
+    riskRewardRatio:  0,
+    winProbability:   0,
+    expectedValue:    0,
+    confidenceScore:  0,
+    regime:           regime as Signal['regime'],
+    session:          session as Signal['session'],
+    macroSentiment:   corr.isRiskOff ? 'Risk-off' : 'Neutral',
+    newsImpact:       'None',
+    isInstitutionalGrade: false,
+    reasoning: {
+      htfBias:             reason,
+      liquidityNarrative:  '',
+      macroContext:        '',
+      newsContext:         '',
+      entryTrigger:        '',
+      riskJustification:   '',
+      bullishFactors:      [],
+      bearishFactors:      [],
+      riskWarnings:        [reason],
+      volatilityWarning:   '',
+    },
+    correlations: {
+      dxyValue:      corr.dxyValue,
+      dxyChange1H:   corr.dxyChange1H,
+      us10YYield:    corr.us10YYield,
+      us10YChange1H: corr.us10YChange1H,
+      vix:           corr.vix,
+      spxChange1D:   corr.spxChange1D,
+      isRiskOff:     corr.isRiskOff,
+      isRiskOn:      corr.isRiskOn ?? false,
+    },
+    volatility: {
+      atr1H:         vol.atr1H,
+      atr4H:         vol.atr4H,
+      adrPercent:    vol.adrPercent,
+      isExpanding:   vol.isExpanding,
+      isContracting: vol.isContracting,
+      regime:        vol.regime,
+    },
+    chartOverlays: overlays,
+    layerScores:   { structure: 0, liquidity: 0, macro: 0, volatility: 0, session: 0, news: 0 },
+    generatedAt:   new Date().toISOString(),
+    expiresAt:     new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+  }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -191,11 +267,11 @@ function round2(n: number): number { return Math.round(n * 100) / 100 }
 function countMacroAligned(f: ReturnType<typeof extractFeatures>, bull: boolean): number {
   let count = 0
   if (bull) {
-    if (f.dxyMomentum > 0.15)  count++
+    if (f.dxyMomentum > 0.15)   count++
     if (f.yieldMomentum > 0.15) count++
     if (f.riskOffScore > 0.5)   count++
   } else {
-    if (f.dxyMomentum < -0.15)  count++
+    if (f.dxyMomentum < -0.15)   count++
     if (f.yieldMomentum < -0.15) count++
     if (f.riskOffScore < 0.3)    count++
   }
@@ -208,11 +284,11 @@ function isMacroDivergent(f: ReturnType<typeof extractFeatures>, bull: boolean):
 }
 
 function buildReasoning(
-  f: ReturnType<typeof extractFeatures>,
-  scoring: ReturnType<typeof scoreSignal>,
+  f:         ReturnType<typeof extractFeatures>,
+  scoring:   ReturnType<typeof scoreSignal>,
   direction: 'Buy' | 'Sell',
-  price: number,
-  vol: ReturnType<typeof calculateVolatility>,
+  price:     number,
+  vol:       ReturnType<typeof calculateVolatility>,
 ): SignalReasoning {
   const bull = direction === 'Buy'
 
@@ -238,7 +314,6 @@ function buildReasoning(
     : 'Macro environment neutral — no strong directional driver.'
 
   const entryTrigger = `Entry at $${price.toFixed(2)}. ${bull ? 'Bullish' : 'Bearish'} confirmation on M15 candle close above/below OB.`
-
   const riskJust = `ATR-based SL (${f.atrRatio.toFixed(1)}× ATR), target $${(scoring.tpPips * PIP).toFixed(1)}. Session: ${f.sessionOverlap > 0.5 ? 'London/NY Overlap (peak liquidity)' : 'Active session'}.`
 
   let volatilityWarning = ''
@@ -250,14 +325,12 @@ function buildReasoning(
   if ((scoring.layerScores.macro ?? 0) < 0.3) riskWarnings.push('Weak macro confirmation — monitor DXY reaction')
 
   return {
-    htfBias,
-    liquidityNarrative,
-    macroContext,
-    newsContext: '',
+    htfBias, liquidityNarrative, macroContext,
+    newsContext:        '',
     entryTrigger,
-    riskJustification: riskJust,
-    bullishFactors: scoring.bullishFactors,
-    bearishFactors: scoring.bearishFactors,
+    riskJustification:  riskJust,
+    bullishFactors:     scoring.bullishFactors,
+    bearishFactors:     scoring.bearishFactors,
     riskWarnings,
     volatilityWarning,
   }
@@ -267,27 +340,27 @@ function buildChartOverlays(htf: MarketStructure): ChartOverlays {
   return {
     orderBlocks: htf.orderBlocks.map(ob => ({
       formedAtTs: ob.formedAt,
-      top: ob.high,
-      bottom: ob.low,
-      isBullish: ob.isBullish,
-      mitigated: !ob.isUnmitigated,
-      strength: ob.strength,
+      top:        ob.high,
+      bottom:     ob.low,
+      isBullish:  ob.isBullish,
+      mitigated:  !ob.isUnmitigated,
+      strength:   ob.strength,
     })),
     fvgZones: htf.fairValueGaps.map(fvg => ({
       formedAtTs: fvg.formedAt,
-      upper: fvg.upperBound,
-      lower: fvg.lowerBound,
-      isBullish: fvg.isBullish,
-      filled: fvg.isFilled,
-      sizePips: fvg.sizePips,
+      upper:      fvg.upperBound,
+      lower:      fvg.lowerBound,
+      isBullish:  fvg.isBullish,
+      filled:     fvg.isFilled,
+      sizePips:   fvg.sizePips,
     })),
     liquidityLevels: htf.liquidityLevels.map(lv => ({
-      price: lv.price,
-      swept: lv.isSwept,
+      price:       lv.price,
+      swept:       lv.isSwept,
       bullishSweep: lv.isBullishSweep,
       description: lv.description,
     })),
-    bosPresent:  htf.breakOfStructure,
+    bosPresent:   htf.breakOfStructure,
     chochPresent: htf.changeOfCharacter,
     htfBullish:   htf.bullishStructure,
     swingHigh:    htf.swingHigh,
