@@ -1,38 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { fbGet, fbSet, fbDelete, fbIncrement } from '@/lib/firebase'
 
 export const runtime = 'nodejs'
 export const revalidate = 0
 
-// Module-level session map — persists across requests on warm Vercel instances.
-// Sessions expire after 2 minutes of no heartbeat.
-const sessions = new Map<string, number>()  // sessionId → lastSeen (ms)
 const EXPIRY_MS = 2 * 60 * 1000
 
-function sweep() {
-  const cutoff = Date.now() - EXPIRY_MS
-  for (const [id, ts] of sessions) {
-    if (ts < cutoff) sessions.delete(id)
-  }
-}
-
-// POST — heartbeat from client (every 30 s)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const id: unknown = body?.id
+    const isNew: boolean = body?.isNew === true
     if (typeof id !== 'string' || id.length < 8 || id.length > 64) {
       return NextResponse.json({ error: 'invalid id' }, { status: 400 })
     }
-    sessions.set(id, Date.now())
-    sweep()
-    return NextResponse.json({ online: sessions.size })
+
+    const now    = Date.now()
+    const cutoff = now - EXPIRY_MS
+
+    const writes: Promise<unknown>[] = [fbSet(`presence/sessions/${id}`, now)]
+    if (isNew) writes.push(fbIncrement('presence/totalVisits'))
+    await Promise.all(writes)
+
+    const sessions = await fbGet<Record<string, number>>('presence/sessions')
+    let online = 0
+    const expiredIds: string[] = []
+    if (sessions) {
+      for (const [sid, ts] of Object.entries(sessions)) {
+        if (ts >= cutoff) online++
+        else expiredIds.push(sid)
+      }
+      expiredIds.forEach(sid => fbDelete(`presence/sessions/${sid}`))
+    }
+
+    const totalVisits = await fbGet<number>('presence/totalVisits') ?? 0
+    return NextResponse.json({ online, totalVisits })
   } catch {
     return NextResponse.json({ error: 'bad request' }, { status: 400 })
   }
 }
 
-// GET — read current count (no side effects)
 export async function GET() {
-  sweep()
-  return NextResponse.json({ online: sessions.size })
+  const cutoff = Date.now() - EXPIRY_MS
+  const [sessions, totalVisits] = await Promise.all([
+    fbGet<Record<string, number>>('presence/sessions'),
+    fbGet<number>('presence/totalVisits'),
+  ])
+  let online = 0
+  if (sessions) {
+    for (const ts of Object.values(sessions)) {
+      if (ts >= cutoff) online++
+    }
+  }
+  return NextResponse.json({ online, totalVisits: totalVisits ?? 0 })
 }

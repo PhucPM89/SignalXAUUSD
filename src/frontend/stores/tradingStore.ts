@@ -45,6 +45,7 @@ interface TradingState {
   connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'error'
   isDarkMode: boolean
   onlineUsers: number
+  totalVisits: number
 
   // Actions
   setTick: (tick: Tick) => void
@@ -59,9 +60,10 @@ interface TradingState {
   setEconomicEvents: (events: EconomicEvent[]) => void
   updateCorrelations: (dxy: number, dxyChg: number, yield10y: number, vix: number) => void
   setConnectionStatus: (status: TradingState['connectionStatus']) => void
-  setTimeframe: (tf: string) => void
+  setTimeframe:   (tf: string) => void
   toggleDarkMode: () => void
   setOnlineUsers: (n: number) => void
+  setTotalVisits: (n: number) => void
 }
 
 export const useTradingStore = create<TradingState>()(
@@ -95,6 +97,7 @@ export const useTradingStore = create<TradingState>()(
       connectionStatus: 'disconnected',
       isDarkMode: true,
       onlineUsers: 0,
+      totalVisits: 0,
 
       setTick: (tick) => set({
         currentPrice:   tick.mid,
@@ -187,6 +190,7 @@ export const useTradingStore = create<TradingState>()(
       setTimeframe:   (tf) => set({ selectedTimeframe: tf }),
       toggleDarkMode: () => set((s) => ({ isDarkMode: !s.isDarkMode })),
       setOnlineUsers: (n) => set({ onlineUsers: n }),
+      setTotalVisits: (n) => set({ totalVisits: n }),
     })),
     { name: 'XAUUSDTradingStore' }
   )

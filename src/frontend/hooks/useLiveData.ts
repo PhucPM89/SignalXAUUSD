@@ -2,15 +2,17 @@
 
 import { useEffect, useRef } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
+import type { SignalCloseType } from '@/stores/tradingStore'
 import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/types/trading'
 
 const TICK_INTERVAL_MS    =    500
 const SIGNAL_INTERVAL_MS  = 30_000
-const MGMT_INTERVAL_MS    = 60_000        // check breakeven / trailing / expiry every 60s
+const MGMT_INTERVAL_MS    = 60_000
 const CORR_INTERVAL_MS    = 60_000
-const NEWS_INTERVAL_MS    =  2 * 60_000   // 2 min — tighter for breaking news detection
-const EVENTS_INTERVAL_MS  = 30 * 60_000   // 30 min
-const SESSION_INTERVAL_MS =  60_000       // 1 min
+const NEWS_INTERVAL_MS    =  2 * 60_000
+const EVENTS_INTERVAL_MS  = 30 * 60_000
+const SESSION_INTERVAL_MS =  60_000
+const PRESENCE_INTERVAL_MS = 30_000
 
 function deriveSession(): SessionType {
   const h = new Date().getUTCHours()
@@ -21,8 +23,6 @@ function deriveSession(): SessionType {
   if (h >= 13 && h < 22)             return 'NewYork'
   return 'OffSession'
 }
-
-const PRESENCE_INTERVAL_MS = 30_000
 
 function getSessionId(): string {
   try {
@@ -38,12 +38,23 @@ function getSessionId(): string {
   }
 }
 
+function checkAndMarkNewVisit(): boolean {
+  try {
+    const key = '__signal_counted'
+    if (sessionStorage.getItem(key)) return false
+    sessionStorage.setItem(key, '1')
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function useLiveData() {
   const {
     setTick, addSignalToHistory, setRegime, closeActiveSignal,
     updateCorrelations, setConnectionStatus,
     setNewsAlerts, setEconomicEvents, setSession,
-    updateSignalSL, setOnlineUsers,
+    updateSignalSL, setOnlineUsers, setTotalVisits,
   } = useTradingStore()
 
   const timers = useRef<ReturnType<typeof setInterval>[]>([])
@@ -61,11 +72,49 @@ export function useLiveData() {
     }
   }
 
+  async function closeAndRecord(type: SignalCloseType) {
+    const { activeSignal } = useTradingStore.getState()
+    if (!activeSignal || activeSignal.direction === 'NOTRADE') return
+
+    closeActiveSignal(type)
+
+    const isBuy = activeSignal.direction === 'BUY'
+    let pnl: number
+    if (type === 'TP_HIT') {
+      pnl = isBuy ? activeSignal.takeProfit - activeSignal.entryPrice : activeSignal.entryPrice - activeSignal.takeProfit
+    } else if (type === 'EXPIRED') {
+      pnl = 0
+    } else {
+      pnl = isBuy ? activeSignal.stopLoss - activeSignal.entryPrice : activeSignal.entryPrice - activeSignal.stopLoss
+    }
+
+    try {
+      await fetch('/api/signals/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id:      activeSignal.id,
+          dir:     activeSignal.direction,
+          entry:   activeSignal.entryPrice,
+          sl:      activeSignal.stopLoss,
+          tp:      activeSignal.takeProfit,
+          rr:      activeSignal.riskRewardRatio,
+          conf:    activeSignal.confidenceScore,
+          regime:  activeSignal.regime  ?? '',
+          session: activeSignal.session ?? '',
+          at:      activeSignal.generatedAt,
+          closed:  new Date().toISOString(),
+          result:  type,
+          pnl:     Math.round(pnl * 100) / 100,
+        }),
+        cache: 'no-store',
+      })
+    } catch { /* non-blocking */ }
+  }
+
   async function pollSignal() {
-    // Read current state imperatively — avoids stale closure over store values
     const { activeSignal, currentPrice } = useTradingStore.getState()
 
-    // Lock active BUY/SELL signals — only replace when closed or expired
     if (activeSignal && (activeSignal.direction === 'BUY' || activeSignal.direction === 'SELL')) {
       const expired = Date.now() > new Date(activeSignal.expiresAt).getTime()
 
@@ -78,11 +127,10 @@ export function useLiveData() {
           ? currentPrice >= activeSignal.takeProfit
           : currentPrice <= activeSignal.takeProfit)
 
-        if (slHit) { closeActiveSignal('SL_HIT') }
-        else if (tpHit) { closeActiveSignal('TP_HIT') }
-        else { return }  // signal still valid — keep Entry/SL/TP locked
+        if (slHit)      { await closeAndRecord('SL_HIT') }
+        else if (tpHit) { await closeAndRecord('TP_HIT') }
+        else            { return }
       }
-      // expired or SL/TP hit → fall through and fetch new signal
     }
 
     try {
@@ -141,17 +189,18 @@ export function useLiveData() {
       const res = await fetch('/api/presence', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: getSessionId() }),
+        body: JSON.stringify({ id: getSessionId(), isNew: checkAndMarkNewVisit() }),
         cache: 'no-store',
       })
       if (res.ok) {
-        const { online } = await res.json()
-        setOnlineUsers(online)
+        const data = await res.json()
+        setOnlineUsers(data.online)
+        if (typeof data.totalVisits === 'number') setTotalVisits(data.totalVisits)
       }
     } catch { /* non-blocking */ }
   }
 
-  function checkSignalManagement() {
+  async function checkSignalManagement() {
     const { activeSignal, currentPrice, signalPhase } = useTradingStore.getState()
     if (!activeSignal || activeSignal.direction === 'NOTRADE') return
 
@@ -164,52 +213,45 @@ export function useLiveData() {
       : activeSignal.entryPrice - currentPrice
     const progressRatio = progress / riskDist
 
-    // 1. Move to breakeven when price travels 1× risk in our favour
     if (signalPhase === 'OPEN' && progressRatio >= 1.0) {
-      const buffer    = 0.50                        // $0.50 above/below entry
-      const beSL      = isBuy
+      const buffer = 0.50
+      const beSL   = isBuy
         ? activeSignal.entryPrice - buffer
         : activeSignal.entryPrice + buffer
       updateSignalSL(beSL, 'BREAKEVEN')
       return
     }
 
-    // 2. Trail SL with ATR once price travels 1.5× risk from breakeven
     if (signalPhase === 'BREAKEVEN' && progressRatio >= 1.5) {
-      const atr       = activeSignal.volatility?.atr1H ?? riskDist  // fallback to risk dist
-      const trail     = atr * 0.5
-      const newSL     = isBuy ? currentPrice - trail : currentPrice + trail
-      const current   = activeSignal.stopLoss
-      // Only ratchet — never widen the stop
+      const atr    = activeSignal.volatility?.atr1H ?? riskDist
+      const trail  = atr * 0.5
+      const newSL  = isBuy ? currentPrice - trail : currentPrice + trail
+      const current = activeSignal.stopLoss
       if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
         updateSignalSL(newSL, 'TRAILING')
       }
       return
     }
 
-    // 3. Continue ratcheting in TRAILING phase
     if (signalPhase === 'TRAILING') {
-      const atr       = activeSignal.volatility?.atr1H ?? riskDist
-      const trail     = atr * 0.5
-      const newSL     = isBuy ? currentPrice - trail : currentPrice + trail
-      const current   = activeSignal.stopLoss
+      const atr    = activeSignal.volatility?.atr1H ?? riskDist
+      const trail  = atr * 0.5
+      const newSL  = isBuy ? currentPrice - trail : currentPrice + trail
+      const current = activeSignal.stopLoss
       if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
         updateSignalSL(newSL, 'TRAILING')
       }
       return
     }
 
-    // 4. Expire the signal after 4h if TP was never reached
-    const expired = Date.now() > new Date(activeSignal.expiresAt).getTime()
-    if (expired) {
-      closeActiveSignal('EXPIRED')
+    if (Date.now() > new Date(activeSignal.expiresAt).getTime()) {
+      await closeAndRecord('EXPIRED')
     }
   }
 
   useEffect(() => {
     setConnectionStatus('connecting')
 
-    // Immediate first calls
     pollTick()
     pollSignal()
     pollCorrelations()

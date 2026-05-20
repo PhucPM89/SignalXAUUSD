@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import { REGIME_COLORS, formatGold } from '@/types/trading'
 import { cn } from '@/lib/utils'
-import { Wifi, WifiOff, AlertCircle } from 'lucide-react'
+import { Wifi, WifiOff, AlertCircle, Globe } from 'lucide-react'
 
 // Selective store subscriptions — component only re-renders when its own fields change
 function useStatusBarStore() {
@@ -22,9 +22,10 @@ function useStatusBarStore() {
   const upcomingEvents    = useTradingStore(s => s.upcomingEvents)
   const lastTickAt        = useTradingStore(s => s.lastTickAt)
   const onlineUsers       = useTradingStore(s => s.onlineUsers)
+  const totalVisits       = useTradingStore(s => s.totalVisits)
   return { currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
     currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers }
+    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers, totalVisits }
 }
 
 // Live clock — starts at 0 (stable server/client hydration), updates after mount
@@ -42,7 +43,7 @@ export default function StatusBar() {
   const {
     currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
     currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers,
+    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers, totalVisits,
   } = useStatusBarStore()
 
   const now = useNow()
@@ -126,6 +127,15 @@ export default function StatusBar() {
       )}
 
       <div className="flex-1" />
+
+      {/* Total visits counter — desktop only */}
+      {totalVisits > 0 && (
+        <div className="hidden sm:flex items-center gap-1 text-[10px]">
+          <Globe size={10} className="text-zinc-600" />
+          <span className="text-zinc-500 font-mono">{totalVisits.toLocaleString()}</span>
+          <span className="text-zinc-600">visits</span>
+        </div>
+      )}
 
       {/* Online users counter */}
       {onlineUsers > 0 && (
