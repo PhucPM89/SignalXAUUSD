@@ -7,7 +7,7 @@ import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/type
 const TICK_INTERVAL_MS    =  1_000
 const SIGNAL_INTERVAL_MS  = 30_000
 const CORR_INTERVAL_MS    = 60_000
-const NEWS_INTERVAL_MS    =  5 * 60_000   // 5 min
+const NEWS_INTERVAL_MS    =  2 * 60_000   // 2 min — tighter for breaking news detection
 const EVENTS_INTERVAL_MS  = 30 * 60_000   // 30 min
 const SESSION_INTERVAL_MS =  60_000       // 1 min
 

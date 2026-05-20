@@ -8,7 +8,7 @@ import GoldChart from '@/components/charts/GoldChart'
 import SignalCard from '@/components/signals/SignalCard'
 import CorrelationPanel from '@/components/macro/CorrelationPanel'
 import NewsPanel from '@/components/news/NewsPanel'
-import RiskCalculator from '@/components/risk/RiskCalculator'
+import LiveWinRatePanel from '@/components/signals/LiveWinRatePanel'
 import { SessionPanel } from '@/components/panels/SessionPanel'
 import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
 import { cn } from '@/lib/utils'
@@ -125,9 +125,9 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Risk calculator */}
+          {/* Live win rate */}
           <div className="px-3 py-3">
-            <RiskCalculator />
+            <LiveWinRatePanel />
           </div>
 
           {/* Signal history */}
