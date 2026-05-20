@@ -59,9 +59,9 @@ export default function StatusBar() {
     : 0
 
   return (
-    <div className="h-10 bg-zinc-900/95 border-b border-zinc-800 flex items-center px-4 gap-6 text-xs flex-shrink-0 z-50">
+    <div className="h-10 bg-zinc-900/95 border-b border-zinc-800 flex items-center px-4 gap-4 sm:gap-6 text-xs flex-shrink-0 z-50">
 
-      {/* Connection indicator */}
+      {/* Connection indicator — always visible */}
       <div className={cn('flex items-center gap-1.5', isConnected ? 'text-emerald-400' : 'text-red-400')}>
         {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
         <span className="font-medium uppercase tracking-widest text-[10px]">
@@ -71,8 +71,8 @@ export default function StatusBar() {
 
       <Divider />
 
-      {/* XAUUSD live price */}
-      <div className="flex items-center gap-3">
+      {/* XAUUSD live price — always visible */}
+      <div className="flex items-center gap-2 sm:gap-3">
         <span className="text-zinc-400 font-bold text-[10px] tracking-widest">XAUUSD</span>
         <span className="text-white font-mono font-bold text-sm">
           {currentPrice > 0 ? formatGold(currentPrice) : '—'}
@@ -84,52 +84,51 @@ export default function StatusBar() {
         )}
       </div>
 
-      {bid > 0 && (
-        <>
-          <Divider />
-          <div className="flex gap-3 text-[10px]">
-            <span className="text-zinc-500">B <span className="text-zinc-300 font-mono">{formatGold(bid)}</span></span>
-            <span className="text-zinc-500">A <span className="text-zinc-300 font-mono">{formatGold(ask)}</span></span>
-            <span className="text-zinc-500">Spd <span className="text-zinc-300 font-mono">{(spread / 0.01).toFixed(0)}</span></span>
-          </div>
-        </>
-      )}
-
-      <Divider />
-
-      {/* Regime + Session */}
-      <div className="flex items-center gap-2 text-[10px]">
-        {currentRegime && (
-          <span className={cn('font-semibold', REGIME_COLORS[currentRegime])}>
-            {currentRegime.toUpperCase()}
-          </span>
+      {/* Secondary info — hidden on mobile, shown sm+ */}
+      <div className="hidden sm:contents">
+        {bid > 0 && (
+          <>
+            <Divider />
+            <div className="flex gap-3 text-[10px]">
+              <span className="text-zinc-500">B <span className="text-zinc-300 font-mono">{formatGold(bid)}</span></span>
+              <span className="text-zinc-500">A <span className="text-zinc-300 font-mono">{formatGold(ask)}</span></span>
+              <span className="text-zinc-500">Spd <span className="text-zinc-300 font-mono">{(spread / 0.01).toFixed(0)}</span></span>
+            </div>
+          </>
         )}
-        {currentSession && (
-          <span className="text-zinc-500">
-            {currentSession} Session
-          </span>
-        )}
+        <Divider />
+        <div className="flex items-center gap-2 text-[10px]">
+          {currentRegime && (
+            <span className={cn('font-semibold', REGIME_COLORS[currentRegime])}>
+              {currentRegime.toUpperCase()}
+            </span>
+          )}
+          {currentSession && (
+            <span className="text-zinc-500">{currentSession} Session</span>
+          )}
+        </div>
       </div>
 
-      {/* Upcoming high-impact event warning */}
+      {/* High-impact event warning — always visible */}
       {hasHighImpact && nextEvent && (
         <>
           <Divider />
           <div className="flex items-center gap-1.5 text-amber-400 animate-pulse">
             <AlertCircle size={11} />
             <span className="text-[10px] font-bold uppercase">
-              {nextEvent.name} ({nextEvent.currency}) in {minsUntil}m
+              <span className="hidden sm:inline">{nextEvent.name} ({nextEvent.currency}) </span>
+              <span className="sm:hidden">⚠ </span>
+              in {minsUntil}m
             </span>
           </div>
         </>
       )}
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Last tick time */}
+      {/* Last tick — hidden on mobile */}
       {lastTickAt && (
-        <span className="text-zinc-600 text-[10px] font-mono">
+        <span className="hidden sm:block text-zinc-600 text-[10px] font-mono">
           {new Date(lastTickAt).toLocaleTimeString('en-US', { hour12: false })} UTC
         </span>
       )}

@@ -14,48 +14,31 @@ import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
 import { cn } from '@/lib/utils'
 import { calcAtr } from '@/lib/market-data'
 import type { Candle, Volatility } from '@/types/trading'
-import { Activity, BarChart2 } from 'lucide-react'
+import { Activity, BarChart2, Globe } from 'lucide-react'
 
-/**
- * XAUUSD Institutional Trading Dashboard
- *
- * Three-column layout optimised for 1920×1080 and 2560×1440:
- *  Left (280px)  : Signal panel + Risk calculator
- *  Centre (flex) : Gold chart (main view)
- *  Right (320px) : Correlations + News + Economic calendar
- *
- * All panels receive live data via Zustand subscriptions.
- * No prop drilling — state flows: SignalR → store → components.
- */
+type MobileTab = 'signal' | 'chart' | 'market'
+
 export default function DashboardPage() {
   const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon, selectedTimeframe, lastSignalResult, signalPhase } = useTradingStore()
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<MobileTab>('chart')
 
   useLiveData()
 
-  useEffect(() => {
-    fetchCandles(selectedTimeframe)
-  }, [selectedTimeframe])
+  useEffect(() => { fetchCandles(selectedTimeframe) }, [selectedTimeframe])
 
   async function fetchCandles(timeframe: string) {
     try {
       const res = await fetch(`/api/market/candles?timeframe=${timeframe}&count=500`)
-      if (res.ok) {
-        const data: Candle[] = await res.json()
-        setCandles(data)
-      }
-    } catch {
-      // non-fatal — chart renders with empty state
-    }
+      if (res.ok) setCandles(await res.json() as Candle[])
+    } catch { /* non-fatal */ }
   }
 
-  // Compute basic volatility from candles so VolatilityPanel shows data
-  // even during Tokyo/Sydney sessions when the signal engine is suppressed
   const basicVolatility = useMemo<Volatility | undefined>(() => {
     if (candles.length < 20) return undefined
     const atr1H = calcAtr(candles.slice(-50))
-    const atr4H = calcAtr(candles.slice(-14)) * 2.2  // H4 ≈ H1 ATR × 2.2
+    const atr4H = calcAtr(candles.slice(-14)) * 2.2
     const prices = candles.slice(-20).map(c => c.close)
     const high20 = Math.max(...prices)
     const low20  = Math.min(...prices)
@@ -63,8 +46,7 @@ export default function DashboardPage() {
     const recent5  = calcAtr(candles.slice(-5))
     const recent20 = calcAtr(candles.slice(-20))
     return {
-      atr1H,
-      atr4H,
+      atr1H, atr4H,
       adrPercent:    adrPct,
       isExpanding:   recent5 > recent20 * 1.15,
       isContracting: recent5 < recent20 * 0.85,
@@ -73,19 +55,24 @@ export default function DashboardPage() {
   }, [candles])
 
   const displayedHistory = signalHistory.slice(0, 8)
+  const hasActiveSignal  = activeSignal && activeSignal.direction !== 'NOTRADE'
 
   return (
-    <div className="h-screen bg-[#0a0a0f] text-white flex flex-col overflow-hidden">
-      {/* Top status bar */}
+    <div className="h-full bg-[#0a0a0f] text-white flex flex-col overflow-hidden">
       <StatusBar />
 
-      {/* Main content area */}
-      <div className="flex-1 flex min-h-0">
+      {/* Main content — 3-column desktop / single-panel mobile */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
 
-        {/* ── LEFT PANEL ── Signal + Risk ──────────────────────────────────── */}
-        <aside className="w-72 flex-shrink-0 flex flex-col border-r border-zinc-800 overflow-hidden">
-          {/* Header */}
-          <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between">
+        {/* ── LEFT PANEL ── Signal + Win Rate ──────────────────────────────── */}
+        <aside className={cn(
+          'flex-col border-zinc-800 overflow-hidden',
+          // Desktop: always visible, fixed width
+          'lg:w-72 lg:flex-shrink-0 lg:border-r lg:flex',
+          // Mobile: full panel, scrollable, shown only on signal tab
+          activeTab === 'signal' ? 'flex w-full overflow-y-auto' : 'hidden',
+        )}>
+          <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
               <Activity size={12} className="text-amber-400" />
               <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
@@ -101,7 +88,7 @@ export default function DashboardPage() {
           {/* TP / SL result banner */}
           {lastSignalResult && (
             <div className={cn(
-              'mx-3 mt-3 rounded-lg border p-3 text-center',
+              'mx-3 mt-3 rounded-lg border p-3 text-center flex-shrink-0',
               lastSignalResult.type === 'TP_HIT'
                 ? 'bg-emerald-500/10 border-emerald-500/30'
                 : 'bg-red-500/10 border-red-500/30'
@@ -123,7 +110,7 @@ export default function DashboardPage() {
 
           {/* No-trade state */}
           {(!activeSignal || activeSignal.direction === 'NOTRADE') && (
-            <div className="mx-3 mt-3 bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-4 text-center">
+            <div className="mx-3 mt-3 bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-4 text-center flex-shrink-0">
               <div className="text-2xl mb-1">—</div>
               <p className="text-[11px] text-zinc-400 font-semibold">NO TRADE</p>
               <p className="text-[10px] text-zinc-600 mt-1">
@@ -137,7 +124,7 @@ export default function DashboardPage() {
 
           {/* Active BUY / SELL signal */}
           {activeSignal && activeSignal.direction !== 'NOTRADE' && (
-            <div className="px-3 pt-3">
+            <div className="px-3 pt-3 flex-shrink-0">
               <div className="flex items-center gap-2 mb-1.5">
                 <span className={cn(
                   'text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border',
@@ -159,12 +146,12 @@ export default function DashboardPage() {
           )}
 
           {/* Live win rate */}
-          <div className="px-3 py-3">
+          <div className="px-3 py-3 flex-shrink-0">
             <LiveWinRatePanel />
           </div>
 
-          {/* Signal history */}
-          <div className="flex-1 overflow-y-auto px-3 pb-3">
+          {/* Signal history — scrollable on desktop, natural flow on mobile */}
+          <div className="lg:flex-1 lg:overflow-y-auto px-3 pb-3">
             {displayedHistory.length > 0 && (
               <>
                 <div className="flex items-center gap-1.5 mb-2 pt-1">
@@ -199,7 +186,11 @@ export default function DashboardPage() {
         </aside>
 
         {/* ── CENTRE PANEL ── Chart ────────────────────────────────────────── */}
-        <main className="flex-1 flex flex-col min-w-0">
+        <main className={cn(
+          'flex-col min-w-0 min-h-0',
+          'lg:flex lg:flex-1',
+          activeTab === 'chart' ? 'flex flex-1' : 'hidden',
+        )}>
           <GoldChart
             candles={candles}
             signal={activeSignal}
@@ -208,24 +199,78 @@ export default function DashboardPage() {
         </main>
 
         {/* ── RIGHT PANEL ── Macro + Session + Volatility + News ───────── */}
-        <aside className="w-80 flex-shrink-0 flex flex-col border-l border-zinc-800 overflow-hidden">
-          {/* Correlation — always visible, pinned at top */}
+        <aside className={cn(
+          'flex-col border-zinc-800 overflow-hidden',
+          // Desktop: always visible, fixed width
+          'lg:w-80 lg:flex-shrink-0 lg:border-l lg:flex',
+          // Mobile: full panel, scrollable, shown only on market tab
+          activeTab === 'market' ? 'flex w-full overflow-y-auto' : 'hidden',
+        )}>
+          {/* Correlations */}
           <div className="flex-shrink-0 border-b border-zinc-800 p-3">
             <CorrelationPanel />
           </div>
-          {/* Session + Volatility — scrollable, capped so News always has room */}
-          <div className="flex-shrink-0 overflow-y-auto border-b border-zinc-800 max-h-[36%] no-scrollbar">
+          {/* Session + Volatility — capped on desktop so News always shows; natural on mobile */}
+          <div className="flex-shrink-0 overflow-y-auto border-b border-zinc-800 lg:max-h-[36%] no-scrollbar">
             <div className="p-3 space-y-3">
               <SessionPanel />
               <VolatilityPanel volatility={activeSignal?.volatility ?? basicVolatility} />
             </div>
           </div>
-          {/* News fills remaining height */}
-          <div className="flex-1 overflow-hidden">
+          {/* News — fills remaining height on desktop, natural height on mobile */}
+          <div className="lg:flex-1 lg:overflow-hidden min-h-64">
             <NewsPanel />
           </div>
         </aside>
       </div>
+
+      {/* ── MOBILE BOTTOM NAV — hidden on desktop ──────────────────────── */}
+      <nav className="lg:hidden flex-shrink-0 h-14 bg-zinc-900/95 border-t border-zinc-800 flex">
+        <MobileTabBtn
+          icon={<Activity size={18} />}
+          label="Signal"
+          active={activeTab === 'signal'}
+          badge={!!hasActiveSignal}
+          onClick={() => setActiveTab('signal')}
+        />
+        <MobileTabBtn
+          icon={<BarChart2 size={18} />}
+          label="Chart"
+          active={activeTab === 'chart'}
+          onClick={() => setActiveTab('chart')}
+        />
+        <MobileTabBtn
+          icon={<Globe size={18} />}
+          label="Market"
+          active={activeTab === 'market'}
+          onClick={() => setActiveTab('market')}
+        />
+      </nav>
     </div>
+  )
+}
+
+function MobileTabBtn({ icon, label, active, onClick, badge }: {
+  icon:    React.ReactNode
+  label:   string
+  active:  boolean
+  onClick: () => void
+  badge?:  boolean
+}) {
+  return (
+    <button
+      className={cn(
+        'flex-1 relative flex flex-col items-center justify-center gap-0.5 h-full',
+        'transition-colors active:opacity-70',
+        active ? 'text-amber-400' : 'text-zinc-500',
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span className="text-[9px] font-bold uppercase tracking-widest">{label}</span>
+      {badge && (
+        <span className="absolute top-2 right-[calc(50%-14px)] w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+      )}
+    </button>
   )
 }

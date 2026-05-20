@@ -15,7 +15,12 @@
 
   html, body {
     height: 100%;
+    height: 100dvh;    /* dvh excludes mobile address bar */
     overflow: hidden;  /* trading terminal — no page scroll */
+  }
+
+  button {
+    touch-action: manipulation;  /* remove 300ms tap delay on mobile */
   }
 
   /* Scrollbar styling */
