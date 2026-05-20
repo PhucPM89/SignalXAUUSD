@@ -135,12 +135,14 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     fvgPrimRef.current = fvgPrim
 
     chart.subscribeCrosshairMove(param => {
-      if (param.seriesData.size > 0) {
-        const d = param.seriesData.get(series) as CandlestickData | undefined
-        setCrosshairPrice(d?.close ?? null)
-      } else {
+      if (!param.point) {
+        // Mouse left the chart — revert to live price
         setCrosshairPrice(null)
+        return
       }
+      // Only update when the cursor is directly on a candle; ignore gaps between bars
+      const d = param.seriesData.get(series) as CandlestickData | undefined
+      if (d) setCrosshairPrice(d.close)
     })
 
     return () => {

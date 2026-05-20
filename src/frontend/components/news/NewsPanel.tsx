@@ -59,12 +59,62 @@ export default function NewsPanel() {
         </button>
       </div>
 
+      {/* Imminent event banner — shown in both tabs */}
+      <ImminentEventBanner events={upcomingEvents} />
+
       {/* Content */}
       {activeTab === 'news' ? (
         <NewsFeed alerts={newsAlerts} />
       ) : (
         <CalendarView events={upcomingEvents} />
       )}
+    </div>
+  )
+}
+
+// ── Imminent event banner ──────────────────────────────────────────────────────
+
+function ImminentEventBanner({ events }: { events: EconomicEvent[] }) {
+  const upcoming = events
+    .filter(e => {
+      const minsUntil = (new Date(e.scheduledAt).getTime() - Date.now()) / 60_000
+      return minsUntil >= 0 && minsUntil <= 60 && ['High', 'Critical', 'Medium'].includes(e.impact)
+    })
+    .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime())
+    .slice(0, 3)
+
+  if (upcoming.length === 0) return null
+
+  return (
+    <div className="px-3 py-2 border-b border-zinc-800 bg-zinc-800/30 flex-shrink-0">
+      <p className="text-[9px] text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+        <AlertCircle size={8} className="text-amber-400" />
+        Upcoming Events
+      </p>
+      <div className="space-y-1">
+        {upcoming.map((evt, i) => {
+          const minsUntil = Math.max(0, Math.round(
+            (new Date(evt.scheduledAt).getTime() - Date.now()) / 60_000
+          ))
+          const isHot = minsUntil <= 30 && ['High', 'Critical'].includes(evt.impact)
+          return (
+            <div key={i} className={cn(
+              'flex items-center justify-between text-[10px] px-2 py-1 rounded',
+              isHot ? 'bg-amber-500/10 border border-amber-500/20' : 'bg-zinc-800/40'
+            )}>
+              <div className="flex items-center gap-1.5 min-w-0">
+                {isHot && <AlertCircle size={9} className="text-amber-400 animate-pulse flex-shrink-0" />}
+                <span className={cn('font-bold flex-shrink-0', IMPACT_COLORS[evt.impact])}>{evt.impact}</span>
+                <span className="text-zinc-500 flex-shrink-0">{evt.currency}</span>
+                <span className="text-zinc-300 truncate">{evt.name}</span>
+              </div>
+              <span className={cn('font-mono font-bold ml-2 flex-shrink-0', isHot ? 'text-amber-400' : 'text-zinc-400')}>
+                {minsUntil}m
+              </span>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
