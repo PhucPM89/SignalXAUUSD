@@ -28,7 +28,7 @@ import { Activity, BarChart2 } from 'lucide-react'
  * No prop drilling — state flows: SignalR → store → components.
  */
 export default function DashboardPage() {
-  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon, selectedTimeframe } = useTradingStore()
+  const { activeSignal, signalHistory, isConnected, hasHighImpactEventSoon, selectedTimeframe, lastSignalResult } = useTradingStore()
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
 
@@ -97,6 +97,29 @@ export default function DashboardPage() {
               isConnected ? 'bg-emerald-500 shadow-emerald-500/50 shadow' : 'bg-red-500'
             )} />
           </div>
+
+          {/* TP / SL result banner */}
+          {lastSignalResult && (
+            <div className={cn(
+              'mx-3 mt-3 rounded-lg border p-3 text-center',
+              lastSignalResult.type === 'TP_HIT'
+                ? 'bg-emerald-500/10 border-emerald-500/30'
+                : 'bg-red-500/10 border-red-500/30'
+            )}>
+              <p className={cn(
+                'text-xs font-bold uppercase tracking-widest',
+                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400'
+              )}>
+                {lastSignalResult.type === 'TP_HIT' ? '✓ Take Profit Hit' : '✗ Stop Loss Hit'}
+              </p>
+              <p className={cn(
+                'text-lg font-mono font-black mt-0.5',
+                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400'
+              )}>
+                {lastSignalResult.pnl >= 0 ? '+' : ''}{lastSignalResult.pnl.toFixed(2)}
+              </p>
+            </div>
+          )}
 
           {/* No-trade state */}
           {(!activeSignal || activeSignal.direction === 'NOTRADE') && (

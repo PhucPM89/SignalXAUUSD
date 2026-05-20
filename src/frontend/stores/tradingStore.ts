@@ -16,6 +16,7 @@ interface TradingState {
   activeSignal: Signal | null
   signalHistory: Signal[]
   signalCount: number
+  lastSignalResult: { type: 'TP_HIT' | 'SL_HIT'; pnl: number } | null
 
   // Market context
   currentRegime: MarketRegime | null
@@ -44,6 +45,7 @@ interface TradingState {
   setTick: (tick: Tick) => void
   setActiveSignal: (signal: Signal | null) => void
   addSignalToHistory: (signal: Signal) => void
+  closeActiveSignal: (type: 'TP_HIT' | 'SL_HIT') => void
   setRegime: (regime: MarketRegime) => void
   setSession: (session: SessionType) => void
   addNewsAlert: (news: NewsAlert) => void
@@ -69,6 +71,7 @@ export const useTradingStore = create<TradingState>()(
       activeSignal: null,
       signalHistory: [],
       signalCount: 0,
+      lastSignalResult: null,
       currentRegime: null,
       currentSession: null,
       isInstitutionalHours: false,
@@ -100,11 +103,25 @@ export const useTradingStore = create<TradingState>()(
       addSignalToHistory: (signal) => set((s) => {
         const isTradeable = signal.direction === 'BUY' || signal.direction === 'SELL'
         return {
-          signalHistory:  isTradeable ? [signal, ...s.signalHistory].slice(0, 100) : s.signalHistory,
-          signalCount:    isTradeable ? s.signalCount + 1 : s.signalCount,
-          activeSignal:   signal,
-          currentSession: signal.session ?? s.currentSession,
-          currentRegime:  signal.regime  ?? s.currentRegime,
+          signalHistory:    isTradeable ? [signal, ...s.signalHistory].slice(0, 100) : s.signalHistory,
+          signalCount:      isTradeable ? s.signalCount + 1 : s.signalCount,
+          activeSignal:     signal,
+          lastSignalResult: isTradeable ? null : s.lastSignalResult,  // clear result on new tradeable signal
+          currentSession:   signal.session ?? s.currentSession,
+          currentRegime:    signal.regime  ?? s.currentRegime,
+        }
+      }),
+
+      closeActiveSignal: (type) => set((s) => {
+        if (!s.activeSignal) return {}
+        const sig   = s.activeSignal
+        const isBuy = sig.direction === 'BUY'
+        const pnl   = type === 'TP_HIT'
+          ? (isBuy ? sig.takeProfit - sig.entryPrice : sig.entryPrice - sig.takeProfit)
+          : (isBuy ? sig.stopLoss   - sig.entryPrice : sig.entryPrice - sig.stopLoss)
+        return {
+          lastSignalResult: { type, pnl: Math.round(pnl * 100) / 100 },
+          activeSignal:     null,
         }
       }),
 

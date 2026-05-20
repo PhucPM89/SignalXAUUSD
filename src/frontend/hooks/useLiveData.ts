@@ -23,7 +23,7 @@ function deriveSession(): SessionType {
 
 export function useLiveData() {
   const {
-    setTick, addSignalToHistory, setRegime,
+    setTick, addSignalToHistory, setRegime, closeActiveSignal,
     updateCorrelations, setConnectionStatus,
     setNewsAlerts, setEconomicEvents, setSession,
   } = useTradingStore()
@@ -44,6 +44,29 @@ export function useLiveData() {
   }
 
   async function pollSignal() {
+    // Read current state imperatively — avoids stale closure over store values
+    const { activeSignal, currentPrice } = useTradingStore.getState()
+
+    // Lock active BUY/SELL signals — only replace when closed or expired
+    if (activeSignal && (activeSignal.direction === 'BUY' || activeSignal.direction === 'SELL')) {
+      const expired = Date.now() > new Date(activeSignal.expiresAt).getTime()
+
+      if (!expired) {
+        const isBuy = activeSignal.direction === 'BUY'
+        const slHit = currentPrice > 0 && (isBuy
+          ? currentPrice <= activeSignal.stopLoss
+          : currentPrice >= activeSignal.stopLoss)
+        const tpHit = currentPrice > 0 && (isBuy
+          ? currentPrice >= activeSignal.takeProfit
+          : currentPrice <= activeSignal.takeProfit)
+
+        if (slHit) { closeActiveSignal('SL_HIT') }
+        else if (tpHit) { closeActiveSignal('TP_HIT') }
+        else { return }  // signal still valid — keep Entry/SL/TP locked
+      }
+      // expired or SL/TP hit → fall through and fetch new signal
+    }
+
     try {
       const res = await fetch('/api/signals/generate', { cache: 'no-store' })
       if (!res.ok) return
