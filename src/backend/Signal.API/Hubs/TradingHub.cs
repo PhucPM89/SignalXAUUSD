@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Signal.Application.DTOs;
 using Signal.Application.Interfaces;
@@ -6,18 +5,6 @@ using Signal.Infrastructure.Messaging;
 
 namespace Signal.API.Hubs;
 
-/// <summary>
-/// Real-time hub — clients subscribe to symbols and receive sub-100ms signal/tick updates.
-///
-/// Group strategy:
-///   "symbol:{XAUUSD}" — all clients watching a specific instrument
-///   "institutional"   — clients who want only high-confidence signals
-///   "user:{userId}"   — per-user portfolio updates
-///
-/// Why SignalR over raw WebSockets: automatic backpressure, group management,
-/// reconnection protocol, and ASP.NET auth integration out of the box.
-/// </summary>
-[Authorize]
 public sealed class TradingHub(
     ISignalRepository signalRepo,
     IMarketDataService marketData,

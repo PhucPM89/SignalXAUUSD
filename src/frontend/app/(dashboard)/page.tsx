@@ -31,9 +31,7 @@ export default function DashboardPage() {
   const [candles, setCandles] = useState<Candle[]>([])
   const [expandedSignalId, setExpandedSignalId] = useState<string | null>(null)
 
-  // Establish SignalR connection
-  // In production: token comes from session/auth context
-  useSignalR(typeof window !== 'undefined' ? sessionStorage.getItem('access_token') ?? '' : '')
+  useSignalR()
 
   // Fetch initial candles
   useEffect(() => {
