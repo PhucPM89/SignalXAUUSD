@@ -11,6 +11,7 @@ import {
 } from './market-structure'
 import { extractFeatures } from './gold-features'
 import { scoreSignal } from './scoring-engine'
+import { computeStructuredRisk, type StructuredRisk } from './risk-levels'
 import { calculateWinRate, sessionToWinRateKey, regimeToWinRateKey } from './win-rate-calculator'
 import type { Signal, ChartOverlays, LayerScores, SignalReasoning } from '@/types/trading'
 
@@ -72,27 +73,20 @@ export async function generateSignal(): Promise<Signal | null> {
     return noTrade(scoring.noTradeReason ?? 'No institutional-grade setup detected')
   }
 
-  // 8. Price computation
+  // 8. Price computation — structure-based SL/TP
   const direction  = scoring.direction
-  const offsetPrice = scoring.entryOffsetPips * PIP
-  let entryPrice: number, stopLoss: number, takeProfit: number
+  const isBuy      = direction === 'Buy'
+  const entryPrice = round2(isBuy
+    ? currentPrice - scoring.entryOffsetPips * PIP
+    : currentPrice + scoring.entryOffsetPips * PIP)
 
-  if (direction === 'Buy') {
-    entryPrice = currentPrice - offsetPrice
-    stopLoss   = entryPrice - scoring.slPips * PIP
-    takeProfit = entryPrice + scoring.tpPips * PIP
-  } else {
-    entryPrice = currentPrice + offsetPrice
-    stopLoss   = entryPrice + scoring.slPips * PIP
-    takeProfit = entryPrice - scoring.tpPips * PIP
-  }
+  const structured = computeStructuredRisk(isBuy, entryPrice, htfStructure, volatility.atr1H)
+  const stopLoss   = structured.stopLoss
+  const takeProfit = structured.takeProfit
+  const riskDist   = Math.abs(entryPrice - stopLoss)
+  const rrRatio    = riskDist > 0 ? round2(Math.abs(takeProfit - entryPrice) / riskDist) : 0
 
-  entryPrice = round2(entryPrice)
-  stopLoss   = round2(stopLoss)
-  takeProfit = round2(takeProfit)
-
-  const rrRatio = scoring.tpPips / Math.max(scoring.slPips, 1)
-  if (rrRatio < 1.8) return noTrade(`RR ${rrRatio.toFixed(1)} below minimum 1.8`)
+  if (rrRatio < 1.5) return noTrade(`Structure R:R ${rrRatio.toFixed(1)} below 1.5`)
 
   // 9. Bayesian win rate
   const bull = direction === 'Buy'
@@ -123,7 +117,7 @@ export async function generateSignal(): Promise<Signal | null> {
   })
 
   // 10. Reasoning narrative
-  const reasoning = buildReasoning(features, scoring, direction, currentPrice, volatility)
+  const reasoning = buildReasoning(features, scoring, direction, currentPrice, volatility, structured)
 
   // 11. Layer scores
   const layerScores: LayerScores = {
@@ -280,11 +274,12 @@ function isMacroDivergent(f: ReturnType<typeof extractFeatures>, bull: boolean):
 }
 
 function buildReasoning(
-  f:         ReturnType<typeof extractFeatures>,
-  scoring:   ReturnType<typeof scoreSignal>,
-  direction: 'Buy' | 'Sell',
-  price:     number,
-  vol:       ReturnType<typeof calculateVolatility>,
+  f:          ReturnType<typeof extractFeatures>,
+  scoring:    ReturnType<typeof scoreSignal>,
+  direction:  'Buy' | 'Sell',
+  price:      number,
+  vol:        ReturnType<typeof calculateVolatility>,
+  structured: StructuredRisk,
 ): SignalReasoning {
   const bull = direction === 'Buy'
 
@@ -310,13 +305,14 @@ function buildReasoning(
     : 'Macro environment neutral — no strong directional driver.'
 
   const entryTrigger = `Entry at $${price.toFixed(2)}. ${bull ? 'Bullish' : 'Bearish'} confirmation on M15 candle close above/below OB.`
-  const riskJust = `ATR-based SL (${f.atrRatio.toFixed(1)}× ATR), target $${(scoring.tpPips * PIP).toFixed(1)}. Session: ${f.sessionOverlap > 0.5 ? 'London/NY Overlap (peak liquidity)' : 'Active session'}.`
+  const riskJust = `SL: ${structured.slReason}. TP: ${structured.tpReason}. Session: ${f.sessionOverlap > 0.5 ? 'London/NY Overlap (peak liquidity)' : 'Active session'}.`
 
   let volatilityWarning = ''
   if (f.volatilityRegime > 0.8) volatilityWarning = '⚠ High volatility regime — ATR elevated. SL sized accordingly.'
   else if (f.volatilityRegime < 0.15) volatilityWarning = '⚠ Low volatility — wait for expansion confirmation.'
 
   const riskWarnings = [...scoring.riskWarnings]
+  if (!structured.usedStructure) riskWarnings.push('No nearby demand/supply zones — ATR-based SL/TP used as fallback')
   if ((scoring.layerScores.structure ?? 0) < 0.3) riskWarnings.push('Weak HTF structure alignment — reduce position size')
   if ((scoring.layerScores.macro ?? 0) < 0.3) riskWarnings.push('Weak macro confirmation — monitor DXY reaction')
 

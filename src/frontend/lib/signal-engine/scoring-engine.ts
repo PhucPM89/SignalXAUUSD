@@ -1,8 +1,5 @@
 import type { GoldFeatures } from './gold-features'
 
-const PIP = 0.01
-const MIN_TARGET = 40    // $40 minimum TP for XAUUSD H1
-const MAX_TARGET = 150   // $150 maximum TP for XAUUSD H1
 const CONFIDENCE_THRESHOLD = 72
 
 const WEIGHTS = {
@@ -18,8 +15,6 @@ export interface ScoringResult {
   direction: 'Buy' | 'Sell' | 'NoTrade'
   confidence: number
   entryOffsetPips: number
-  slPips: number
-  tpPips: number
   layerScores: Record<string, number>
   noTradeReason?: string
   bullishFactors: string[]
@@ -65,16 +60,9 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
     return noTrade('Insufficient directional conviction — market ambiguous', warnings)
 
   const direction: 'Buy' | 'Sell' = bullScore > bearScore ? 'Buy' : 'Sell'
-  const { slPips, tpPips, entryOffsetPips } = riskParams(features, confidence)
+  const entryOffsetPips = features.obProximityScore > 0.7 ? 0 : features.obProximityScore > 0.4 ? 100 : 0
 
-  if (slPips <= 0 || tpPips <= 0)
-    return noTrade('Could not compute valid SL/TP', warnings)
-
-  const rr = tpPips / slPips
-  if (rr < 1.8)
-    return noTrade(`RR ${rr.toFixed(1)} below minimum 1.8`, warnings)
-
-  return { direction, confidence, entryOffsetPips, slPips, tpPips,
+  return { direction, confidence, entryOffsetPips,
     layerScores, bullishFactors: bullish, bearishFactors: bearish, riskWarnings: warnings }
 }
 
@@ -196,23 +184,11 @@ function directionalScore(f: GoldFeatures, buy: boolean): number {
   }
 }
 
-function riskParams(f: GoldFeatures, confidence: number) {
-  // atr1H is in dollars (e.g. $30). atrRatio = atr1H/10, atrPips = atrRatio*1000 = atr1H*100
-  const atrPips = f.atrRatio * 1000                      // e.g. ATR=$30 → 3000 pips
-  const slMult  = 1.2 + f.volatilityRegime * 0.8        // 1.2× ATR (quiet) → 2.0× ATR (volatile)
-  const slPips  = Math.max(1500, Math.min(6000, atrPips * slMult))  // $15 – $60
-  const tpMult  = 2.2 + ((confidence - 72) / 28) * 0.8  // 2.2× RR (min conf) → 3.0× RR (max conf)
-  const tpPips  = Math.max(MIN_TARGET / PIP, Math.min(MAX_TARGET / PIP, slPips * tpMult))  // $40 – $150
-  // Entry offset: wait for small pullback near OB (100 pips = $1 for gold)
-  const entryOffsetPips = f.obProximityScore > 0.7 ? 0 : f.obProximityScore > 0.4 ? 100 : 0
-  return { slPips, tpPips, entryOffsetPips }
-}
-
 function sigmoidScale(raw: number): number {
   return 1 / (1 + Math.exp(-raw * 4))
 }
 
 function noTrade(reason: string, warnings: string[] = []): ScoringResult {
-  return { direction: 'NoTrade', confidence: 0, entryOffsetPips: 0, slPips: 0, tpPips: 0,
+  return { direction: 'NoTrade', confidence: 0, entryOffsetPips: 0,
     layerScores: {}, noTradeReason: reason, bullishFactors: [], bearishFactors: [], riskWarnings: warnings }
 }
