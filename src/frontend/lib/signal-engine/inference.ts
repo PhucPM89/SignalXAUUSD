@@ -51,12 +51,7 @@ export async function generateSignal(): Promise<Signal | null> {
     return noTrade('Sydney / dead session — Gold liquidity minimal')
   }
 
-  // 5. Compression gate
-  if (regime === 'Compression' && !volatility.isExpanding) {
-    return noTrade('Market in compression — waiting for breakout expansion')
-  }
-
-  // 6. Feature extraction
+  // 5. Feature extraction
   const features = extractFeatures(
     htfStructure, ltfStructure, htfScore, ltfScore,
     {

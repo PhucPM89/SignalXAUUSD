@@ -44,8 +44,16 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
     news:       scoreNews(features, warnings),
   }
 
-  const rawScore = (Object.keys(WEIGHTS) as (keyof typeof WEIGHTS)[])
-    .reduce((s, k) => s + layerScores[k] * WEIGHTS[k], 0)
+  // Confidence = signal STRENGTH, not directional bias.
+  // Use abs() for directional layers so strong bearish gives same confidence as strong bullish.
+  // The direction is decided separately by directionalScore().
+  const rawScore =
+    Math.abs(layerScores.structure)  * WEIGHTS.structure +
+    Math.abs(layerScores.liquidity)  * WEIGHTS.liquidity +
+    Math.abs(layerScores.macro)      * WEIGHTS.macro     +
+    layerScores.volatility           * WEIGHTS.volatility +
+    layerScores.session              * WEIGHTS.session   +
+    layerScores.news                 * WEIGHTS.news
   const confidence = Math.round(sigmoidScale(rawScore) * 100)
 
   if (confidence < CONFIDENCE_THRESHOLD)
