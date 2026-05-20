@@ -59,7 +59,7 @@ export async function fetchCandles(
 
     if (!timestamps.length || !quotes) throw new Error('No data')
 
-    const candles: CandleData[] = []
+    const raw: CandleData[] = []
     for (let i = 0; i < timestamps.length; i++) {
       const o = quotes.open?.[i]
       const h = quotes.high?.[i]
@@ -67,19 +67,37 @@ export async function fetchCandles(
       const c = quotes.close?.[i]
       if (o == null || h == null || l == null || c == null) continue
       if (h < l || h < Math.min(o, c) || l > Math.max(o, c)) continue
-
-      if (timeframe === 'H4') {
-        const d = new Date(timestamps[i] * 1000)
-        if (d.getUTCHours() % 4 !== 0) continue
-      }
-
-      candles.push({ time: timestamps[i], open: o, high: h, low: l, close: c,
+      raw.push({ time: timestamps[i], open: o, high: h, low: l, close: c,
         volume: quotes.volume?.[i] ?? 0 })
     }
-    return candles.slice(-count)
+
+    // H4: properly aggregate 4× H1 candles → correct OHLCV per 4-hour window
+    if (timeframe === 'H4') return aggregateToH4(raw, count)
+
+    return raw.slice(-count)
   } catch {
     return tryTwelveData(symbol, timeframe, count)
   }
+}
+
+function aggregateToH4(h1: CandleData[], count: number): CandleData[] {
+  const PERIOD = 4 * 3600  // seconds per 4-hour window
+  const map = new Map<number, CandleData>()
+  for (const c of h1) {
+    const bucket = Math.floor(c.time / PERIOD) * PERIOD
+    const agg = map.get(bucket)
+    if (!agg) {
+      map.set(bucket, { ...c, time: bucket })
+    } else {
+      agg.high   = Math.max(agg.high, c.high)
+      agg.low    = Math.min(agg.low,  c.low)
+      agg.close  = c.close   // last H1 close = H4 close
+      agg.volume += c.volume
+    }
+  }
+  return [...map.values()]
+    .sort((a, b) => a.time - b.time)
+    .slice(-count)
 }
 
 async function tryTwelveData(symbol: string, timeframe: string, count: number): Promise<CandleData[]> {
