@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveData } from '@/hooks/useLiveData'
 import { useTradingStore } from '@/stores/tradingStore'
 import StatusBar from '@/components/layout/StatusBar'
@@ -12,7 +12,8 @@ import RiskCalculator from '@/components/risk/RiskCalculator'
 import { SessionPanel } from '@/components/panels/SessionPanel'
 import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
 import { cn } from '@/lib/utils'
-import type { Candle } from '@/types/trading'
+import { calcAtr } from '@/lib/market-data'
+import type { Candle, Volatility } from '@/types/trading'
 import { Activity, BarChart2 } from 'lucide-react'
 
 /**
@@ -48,6 +49,28 @@ export default function DashboardPage() {
       // non-fatal — chart renders with empty state
     }
   }
+
+  // Compute basic volatility from candles so VolatilityPanel shows data
+  // even during Tokyo/Sydney sessions when the signal engine is suppressed
+  const basicVolatility = useMemo<Volatility | undefined>(() => {
+    if (candles.length < 20) return undefined
+    const atr1H = calcAtr(candles.slice(-50))
+    const atr4H = calcAtr(candles.slice(-14)) * 2.2  // H4 ≈ H1 ATR × 2.2
+    const prices = candles.slice(-20).map(c => c.close)
+    const high20 = Math.max(...prices)
+    const low20  = Math.min(...prices)
+    const adrPct = ((high20 - low20) / low20) * 100
+    const recent5  = calcAtr(candles.slice(-5))
+    const recent20 = calcAtr(candles.slice(-20))
+    return {
+      atr1H,
+      atr4H,
+      adrPercent:    adrPct,
+      isExpanding:   recent5 > recent20 * 1.15,
+      isContracting: recent5 < recent20 * 0.85,
+      regime:        recent5 > recent20 * 1.15 ? 'Expanding' : recent5 < recent20 * 0.85 ? 'Contracting' : 'Normal',
+    }
+  }, [candles])
 
   const displayedHistory = signalHistory.slice(0, 8)
 
@@ -150,14 +173,17 @@ export default function DashboardPage() {
           />
         </main>
 
-        {/* ── RIGHT PANEL ── Session + Volatility + Macro + News ─────────── */}
+        {/* ── RIGHT PANEL ── Macro + Session + Volatility + News ───────── */}
         <aside className="w-80 flex-shrink-0 flex flex-col border-l border-zinc-800 overflow-hidden">
-          {/* Scrollable top section */}
-          <div className="flex-shrink-0 overflow-y-auto border-b border-zinc-800 max-h-[55%] no-scrollbar">
+          {/* Correlation — always visible, pinned at top */}
+          <div className="flex-shrink-0 border-b border-zinc-800 p-3">
+            <CorrelationPanel />
+          </div>
+          {/* Session + Volatility — scrollable, capped so News always has room */}
+          <div className="flex-shrink-0 overflow-y-auto border-b border-zinc-800 max-h-[36%] no-scrollbar">
             <div className="p-3 space-y-3">
               <SessionPanel />
-              <VolatilityPanel volatility={activeSignal?.volatility} />
-              <CorrelationPanel />
+              <VolatilityPanel volatility={activeSignal?.volatility ?? basicVolatility} />
             </div>
           </div>
           {/* News fills remaining height */}

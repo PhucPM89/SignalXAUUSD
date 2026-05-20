@@ -135,14 +135,10 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     fvgPrimRef.current = fvgPrim
 
     chart.subscribeCrosshairMove(param => {
-      if (!param.point) {
-        // Mouse left the chart — revert to live price
-        setCrosshairPrice(null)
-        return
-      }
-      // Only update when the cursor is directly on a candle; ignore gaps between bars
+      // Only track crosshair price for displaying OHLC tooltip — NOT used in toolbar
+      if (!param.point) { setCrosshairPrice(null); return }
       const d = param.seriesData.get(series) as CandlestickData | undefined
-      if (d) setCrosshairPrice(d.close)
+      setCrosshairPrice(d?.close ?? null)
     })
 
     return () => {
@@ -377,8 +373,6 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     prim.setZones(overlays ? fvgToZones(overlays) : [])
   }, [signal])
 
-  const displayPrice = crosshairPrice ?? currentPrice
-
   return (
     <div className={cn('flex flex-col bg-[#06060b] rounded-lg overflow-hidden relative', className)}>
 
@@ -391,13 +385,20 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
             <span className="text-white font-bold text-sm tracking-wider font-mono">XAU/USD</span>
           </div>
 
-          {/* Price */}
+          {/* Always show live price — crosshair price appears natively on the Y-axis */}
           <span className={cn(
             'text-lg font-mono font-semibold tabular-nums',
-            displayPrice > 0 ? 'text-white' : 'text-zinc-600'
+            currentPrice > 0 ? 'text-white' : 'text-zinc-600'
           )}>
-            {displayPrice > 0 ? formatGold(displayPrice) : '———'}
+            {currentPrice > 0 ? formatGold(currentPrice) : '———'}
           </span>
+
+          {/* Crosshair candle price (shown only when hovering a historical bar) */}
+          {crosshairPrice !== null && crosshairPrice !== currentPrice && (
+            <span className="text-[11px] font-mono text-zinc-400 tabular-nums">
+              bar {formatGold(crosshairPrice)}
+            </span>
+          )}
 
           {/* Market structure badges */}
           {signal?.chartOverlays && (
