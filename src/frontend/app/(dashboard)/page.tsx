@@ -33,21 +33,24 @@ export default function DashboardPage() {
 
   useSignalR()
 
-  // Fetch initial candles
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000'
+
   useEffect(() => {
     fetchCandles('H1')
   }, [])
 
   async function fetchCandles(timeframe: string) {
     try {
-      const res = await fetch(`/api/market/candles/XAUUSD?timeframe=${timeframe}&count=200`, {
-        headers: { Authorization: `Bearer ${sessionStorage.getItem('access_token') ?? ''}` },
-      })
+      const res = await fetch(`${apiBase}/api/v1/market/candles/XAUUSD?timeframe=${timeframe}&count=200`)
       if (res.ok) {
         const data: Candle[] = await res.json()
         setCandles(data)
+      } else {
+        console.error('Candles fetch failed:', res.status, await res.text())
       }
-    } catch { /* handled by status bar connection indicator */ }
+    } catch (e) {
+      console.error('Candles fetch error:', e)
+    }
   }
 
   const displayedHistory = signalHistory.slice(0, 8)
