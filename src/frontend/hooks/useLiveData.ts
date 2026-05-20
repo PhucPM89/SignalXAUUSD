@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/types/trading'
 
-const TICK_INTERVAL_MS    =  1_000
+const TICK_INTERVAL_MS    =    500
 const SIGNAL_INTERVAL_MS  = 30_000
 const MGMT_INTERVAL_MS    = 60_000        // check breakeven / trailing / expiry every 60s
 const CORR_INTERVAL_MS    = 60_000

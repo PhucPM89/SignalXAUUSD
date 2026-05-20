@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { fetchTickData } from '@/lib/market-data'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   const td     = await fetchTickData('XAUUSD')
   const spread = 0.02

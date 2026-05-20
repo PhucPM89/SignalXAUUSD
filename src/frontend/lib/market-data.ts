@@ -39,7 +39,7 @@ export async function fetchCandles(
   const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=${interval}&range=${range}`
 
   try {
-    const res = await fetch(url, { next: { revalidate: 60 } })
+    const res = await fetch(url, { next: { revalidate: 30 } })
     if (!res.ok) throw new Error(`Yahoo ${res.status}`)
     const data = await res.json()
     const result = data?.chart?.result?.[0]
@@ -80,7 +80,7 @@ async function tryTwelveData(symbol: string, timeframe: string, count: number): 
   const url = `https://api.twelvedata.com/time_series?symbol=${tdSym}&interval=${tfMap[timeframe] ?? '1h'}&outputsize=${count}&apikey=${key}`
 
   try {
-    const r = await fetch(url, { next: { revalidate: 60 } })
+    const r = await fetch(url, { next: { revalidate: 30 } })
     const d = await r.json()
     if (!Array.isArray(d.values)) return generateSyntheticCandles(count)
     return (d.values as Record<string, string>[])
@@ -108,32 +108,52 @@ export interface TickData {
 
 let _tickCache: TickData = { price: 0, change24H: 0, changePct24H: 0 }
 let _tickTs = 0
-const TICK_CACHE_MS = 1_500
+const TICK_CACHE_MS = 800   // fits within 500ms frontend poll cycle
 
 export async function fetchTickData(symbol: string): Promise<TickData> {
   const now = Date.now()
   if (_tickCache.price > 0 && now - _tickTs < TICK_CACHE_MS) return _tickCache
 
   const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
+
+  // Primary: v7 quote endpoint — returns only current price metadata, no OHLCV array
   try {
-    const res = await fetch(
-      `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=1d`,
+    const res   = await fetch(
+      `${YAHOO_BASE}/v7/finance/quote?symbols=${encodeURIComponent(yahooSym)}`,
       { cache: 'no-store' }
     )
-    const data = await res.json()
-    const meta = data?.chart?.result?.[0]?.meta
-    const price      = (meta?.regularMarketPrice  as number) ?? 0
-    const prevClose  = (meta?.chartPreviousClose  as number) ?? price
-    const change24H  = price - prevClose
-    const changePct24H = prevClose > 0 ? (change24H / prevClose) * 100 : 0
+    const data  = await res.json()
+    const quote = data?.quoteResponse?.result?.[0]
+    const price = (quote?.regularMarketPrice as number) ?? 0
     if (price > 0) {
+      const prev         = (quote?.regularMarketPreviousClose as number) ?? price
+      const change24H    = price - prev
+      const changePct24H = prev > 0 ? (change24H / prev) * 100 : 0
       _tickCache = { price, change24H, changePct24H }
-      _tickTs = now
+      _tickTs    = now
+      return _tickCache
     }
-    return _tickCache
-  } catch {
-    return _tickCache
-  }
+  } catch { /* fall through to chart fallback */ }
+
+  // Fallback: chart endpoint with minimal 5-minute range
+  try {
+    const res       = await fetch(
+      `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=5m`,
+      { cache: 'no-store' }
+    )
+    const data      = await res.json()
+    const meta      = data?.chart?.result?.[0]?.meta
+    const price     = (meta?.regularMarketPrice as number) ?? 0
+    const prevClose = (meta?.chartPreviousClose as number) ?? price
+    if (price > 0) {
+      const change24H    = price - prevClose
+      const changePct24H = prevClose > 0 ? (change24H / prevClose) * 100 : 0
+      _tickCache = { price, change24H, changePct24H }
+      _tickTs    = now
+    }
+  } catch { /* keep last cached value */ }
+
+  return _tickCache
 }
 
 // ── Correlations (with actual 1H changes) ─────────────────────────────────────
@@ -152,8 +172,8 @@ export interface CorrelationSnapshot {
 async function fetchSymbolHourly(sym: string) {
   try {
     const res = await fetch(
-      `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=5d`,
-      { next: { revalidate: 120 } }
+      `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1h&range=2d`,
+      { next: { revalidate: 60 } }
     )
     const data  = await res.json()
     const result = data?.chart?.result?.[0]
