@@ -62,6 +62,12 @@ public static class ServiceCollectionExtensions
             c.BaseAddress = new Uri("https://api.twelvedata.com"))
             .AddPolicyHandler(GetRetryPolicy());
 
+        services.AddHttpClient("Yahoo", c =>
+        {
+            c.BaseAddress = new Uri("https://query1.finance.yahoo.com");
+            c.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0");
+        }).AddPolicyHandler(GetRetryPolicy());
+
         services.AddHttpClient("SignalEngine", c =>
         {
             c.BaseAddress = new Uri(config["SignalEngine:BaseUrl"] ?? "http://signal-engine:8000");

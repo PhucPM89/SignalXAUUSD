@@ -30,16 +30,17 @@ public sealed class MarketDataService(
         if (cached is not null && decimal.TryParse(cached, out var cachedPrice))
             return cachedPrice;
 
-        // Try primary provider → fallback to secondary
-        decimal price;
-        try
+        // Try Yahoo Finance (free) → Polygon → Twelve Data
+        decimal price = 0;
+        try { price = await GetCurrentPriceFromYahooAsync(symbol, ct); } catch { }
+        if (price == 0)
         {
-            price = await FetchPriceFromPolygonAsync(symbol, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Primary price feed failed for {Symbol}, falling back", symbol);
-            price = await FetchPriceFromTwelveDataAsync(symbol, ct);
+            try { price = await FetchPriceFromPolygonAsync(symbol, ct); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Polygon price failed for {Symbol}, trying TwelveData", symbol);
+                try { price = await FetchPriceFromTwelveDataAsync(symbol, ct); } catch { }
+            }
         }
 
         await cache.SetStringAsync(cacheKey, price.ToString(),
@@ -140,52 +141,124 @@ public sealed class MarketDataService(
         if (cached is not null)
             return JsonSerializer.Deserialize<List<Candle>>(cached, JsonOpts) ?? [];
 
-        if (string.IsNullOrWhiteSpace(options.Value.TwelveDataApiKey))
+        // Try Yahoo Finance first (free, no API key needed)
+        var yahooCandles = await FetchCandlesFromYahooAsync(symbol, tf, count, ct);
+        if (yahooCandles is { Count: > 0 })
         {
-            logger.LogWarning("TwelveDataApiKey not configured — returning synthetic candles for {Symbol}", symbol);
-            return GenerateSyntheticCandles(symbol, tf, count);
+            await cache.SetStringAsync(cacheKey,
+                JsonSerializer.Serialize(yahooCandles, JsonOpts),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2) }, ct);
+            return yahooCandles;
         }
 
-        var client = httpClientFactory.CreateClient("TwelveData");
-        var interval = TimeframeToInterval(tf);
-        // Twelve Data uses XAU/USD format for gold
-        var tdSymbol = symbol == "XAUUSD" ? "XAU/USD" : symbol;
-        var url = $"/time_series?symbol={tdSymbol}&interval={interval}&outputsize={count}&apikey={options.Value.TwelveDataApiKey}";
+        // Fallback: Twelve Data (requires API key)
+        if (!string.IsNullOrWhiteSpace(options.Value.TwelveDataApiKey))
+        {
+            var tdSymbol = symbol == "XAUUSD" ? "XAU/USD" : symbol;
+            var url = $"/time_series?symbol={tdSymbol}&interval={TimeframeToInterval(tf)}&outputsize={count}&apikey={options.Value.TwelveDataApiKey}";
+            try
+            {
+                var response = await httpClientFactory.CreateClient("TwelveData")
+                    .GetFromJsonAsync<TwelveDataResponse>(url, ct);
+                if (response?.Values is { Length: > 0 })
+                {
+                    var candles = response.Values
+                        .Select(v => Candle.Create(symbol, tf, DateTime.Parse(v.Datetime),
+                            decimal.Parse(v.Open), decimal.Parse(v.High),
+                            decimal.Parse(v.Low), decimal.Parse(v.Close),
+                            decimal.TryParse(v.Volume, out var vol) ? vol : 0))
+                        .OrderBy(c => c.OpenTime).ToList();
+                    await cache.SetStringAsync(cacheKey, JsonSerializer.Serialize(candles, JsonOpts),
+                        new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2) }, ct);
+                    return candles;
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "TwelveData candle fetch failed for {Symbol} {Tf}", symbol, tf);
+            }
+        }
 
-        TwelveDataResponse? response;
+        logger.LogWarning("All candle sources failed for {Symbol} {Tf} — returning synthetic", symbol, tf);
+        return GenerateSyntheticCandles(symbol, tf, count);
+    }
+
+    private async Task<IReadOnlyList<Candle>?> FetchCandlesFromYahooAsync(
+        string symbol, Timeframe tf, int count, CancellationToken ct)
+    {
         try
         {
-            response = await client.GetFromJsonAsync<TwelveDataResponse>(url, ct);
+            var (interval, range) = tf switch
+            {
+                Timeframe.M5  => ("5m",  "5d"),
+                Timeframe.M15 => ("15m", "7d"),
+                Timeframe.M30 => ("30m", "14d"),
+                Timeframe.H4  => ("60m", "60d"),
+                Timeframe.D1  => ("1d",  "1y"),
+                _             => ("60m", "30d"),   // H1 default
+            };
+
+            var yahooSymbol = symbol switch
+            {
+                "XAUUSD" => "GC=F",     // Gold Futures (real-time spot equivalent)
+                "EURUSD" => "EURUSD=X",
+                "DXY"    => "DX-Y.NYB",
+                _        => symbol
+            };
+
+            var client = httpClientFactory.CreateClient("Yahoo");
+            var url = $"/v8/finance/chart/{yahooSymbol}?interval={interval}&range={range}";
+            var resp = await client.GetFromJsonAsync<YahooChartResponse>(url, JsonOpts, ct);
+
+            var result = resp?.Chart?.Result?.FirstOrDefault();
+            var quotes = result?.Indicators?.Quote?.FirstOrDefault();
+            if (result?.Timestamp is null || quotes is null) return null;
+
+            var candles = new List<Candle>();
+            for (int i = 0; i < result.Timestamp.Length; i++)
+            {
+                var o = quotes.Open?[i];
+                var h = quotes.High?[i];
+                var l = quotes.Low?[i];
+                var c = quotes.Close?[i];
+                if (o is null || h is null || l is null || c is null) continue;
+                if (h < l || h < o || h < c || l > o || l > c) continue;  // sanity
+
+                var time = DateTimeOffset.FromUnixTimeSeconds(result.Timestamp[i]).UtcDateTime;
+
+                // For H4: aggregate 4 x 1h bars
+                if (tf == Timeframe.H4)
+                {
+                    if (time.Hour % 4 == 0)
+                        candles.Add(Candle.Create(symbol, tf, time,
+                            (decimal)o, (decimal)h, (decimal)l, (decimal)c,
+                            (decimal)(quotes.Volume?[i] ?? 0)));
+                }
+                else
+                {
+                    candles.Add(Candle.Create(symbol, tf, time,
+                        (decimal)o, (decimal)h, (decimal)l, (decimal)c,
+                        (decimal)(quotes.Volume?[i] ?? 0)));
+                }
+            }
+
+            return candles.OrderBy(x => x.OpenTime).TakeLast(count).ToList();
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed fetching candles {Symbol} {Tf} — falling back to synthetic", symbol, tf);
-            return GenerateSyntheticCandles(symbol, tf, count);
+            logger.LogWarning(ex, "Yahoo Finance candle fetch failed for {Symbol}", symbol);
+            return null;
         }
+    }
 
-        if (response?.Values is null || response.Values.Length == 0)
-        {
-            logger.LogWarning("Twelve Data returned no values for {Symbol} {Tf} — falling back to synthetic", symbol, tf);
-            return GenerateSyntheticCandles(symbol, tf, count);
-        }
-
-        var candles = response.Values
-            .Select(v => Candle.Create(symbol, tf,
-                DateTime.Parse(v.Datetime),
-                decimal.Parse(v.Open), decimal.Parse(v.High),
-                decimal.Parse(v.Low), decimal.Parse(v.Close),
-                decimal.TryParse(v.Volume, out var vol) ? vol : 0))
-            .OrderBy(c => c.OpenTime)
-            .ToList();
-
-        await cache.SetStringAsync(cacheKey,
-            JsonSerializer.Serialize(candles, JsonOpts),
-            new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds((int)tf * 30)
-            }, ct);
-
-        return candles;
+    public async Task<decimal> GetCurrentPriceFromYahooAsync(string symbol, CancellationToken ct = default)
+    {
+        var yahooSymbol = symbol == "XAUUSD" ? "GC=F" : symbol;
+        var client = httpClientFactory.CreateClient("Yahoo");
+        var resp = await client.GetFromJsonAsync<YahooChartResponse>(
+            $"/v8/finance/chart/{yahooSymbol}?interval=1m&range=1d", JsonOpts, ct);
+        var price = resp?.Chart?.Result?.FirstOrDefault()?.Meta?.RegularMarketPrice;
+        return price.HasValue ? (decimal)price.Value : 0;
     }
 
     private static IReadOnlyList<Candle> GenerateSyntheticCandles(string symbol, Timeframe tf, int count)
@@ -310,6 +383,22 @@ public sealed class MarketDataService(
     private record TwelveDataPrice(string? Price);
     private record PolygonLastQuote(PolygonResult? Results);
     private record PolygonResult(decimal P);   // P = ask price
+
+    // Yahoo Finance v8 chart response
+    private record YahooChartResponse(YahooChart? Chart);
+    private record YahooChart(YahooResult[]? Result);
+    private record YahooResult(
+        YahooMeta? Meta,
+        long[]? Timestamp,
+        YahooIndicators? Indicators);
+    private record YahooMeta(double? RegularMarketPrice);
+    private record YahooIndicators(YahooQuote[]? Quote);
+    private record YahooQuote(
+        double?[]? Open,
+        double?[]? High,
+        double?[]? Low,
+        double?[]? Close,
+        long?[]? Volume);
 }
 
 public sealed class MarketDataOptions
