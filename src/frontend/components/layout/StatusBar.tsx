@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import { REGIME_COLORS, formatGold } from '@/types/trading'
 import { cn } from '@/lib/utils'
@@ -26,13 +26,15 @@ function useStatusBarStore() {
     hasHighImpact, upcomingEvents, lastTickAt }
 }
 
-// Live clock ticking every second for accurate event countdown
+// Live clock — starts at 0 (stable server/client hydration), updates after mount
 function useNow() {
-  return useSyncExternalStore(
-    (cb) => { const id = setInterval(cb, 1_000); return () => clearInterval(id) },
-    () => Date.now(),
-    () => Date.now(),
-  )
+  const [now, setNow] = useState(0)
+  useEffect(() => {
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(id)
+  }, [])
+  return now
 }
 
 export default function StatusBar() {
