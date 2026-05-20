@@ -6,6 +6,7 @@ import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/type
 
 const TICK_INTERVAL_MS    =  1_000
 const SIGNAL_INTERVAL_MS  = 30_000
+const MGMT_INTERVAL_MS    = 60_000        // check breakeven / trailing / expiry every 60s
 const CORR_INTERVAL_MS    = 60_000
 const NEWS_INTERVAL_MS    =  2 * 60_000   // 2 min — tighter for breaking news detection
 const EVENTS_INTERVAL_MS  = 30 * 60_000   // 30 min
@@ -26,6 +27,7 @@ export function useLiveData() {
     setTick, addSignalToHistory, setRegime, closeActiveSignal,
     updateCorrelations, setConnectionStatus,
     setNewsAlerts, setEconomicEvents, setSession,
+    updateSignalSL,
   } = useTradingStore()
 
   const timers = useRef<ReturnType<typeof setInterval>[]>([])
@@ -118,6 +120,61 @@ export function useLiveData() {
     setSession(deriveSession())
   }
 
+  function checkSignalManagement() {
+    const { activeSignal, currentPrice, signalPhase } = useTradingStore.getState()
+    if (!activeSignal || activeSignal.direction === 'NOTRADE') return
+
+    const isBuy    = activeSignal.direction === 'BUY'
+    const riskDist = Math.abs(activeSignal.stopLoss - activeSignal.entryPrice)
+    if (riskDist <= 0) return
+
+    const progress      = isBuy
+      ? currentPrice - activeSignal.entryPrice
+      : activeSignal.entryPrice - currentPrice
+    const progressRatio = progress / riskDist
+
+    // 1. Move to breakeven when price travels 1× risk in our favour
+    if (signalPhase === 'OPEN' && progressRatio >= 1.0) {
+      const buffer    = 0.50                        // $0.50 above/below entry
+      const beSL      = isBuy
+        ? activeSignal.entryPrice - buffer
+        : activeSignal.entryPrice + buffer
+      updateSignalSL(beSL, 'BREAKEVEN')
+      return
+    }
+
+    // 2. Trail SL with ATR once price travels 1.5× risk from breakeven
+    if (signalPhase === 'BREAKEVEN' && progressRatio >= 1.5) {
+      const atr       = activeSignal.volatility?.atr1H ?? riskDist  // fallback to risk dist
+      const trail     = atr * 0.5
+      const newSL     = isBuy ? currentPrice - trail : currentPrice + trail
+      const current   = activeSignal.stopLoss
+      // Only ratchet — never widen the stop
+      if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
+        updateSignalSL(newSL, 'TRAILING')
+      }
+      return
+    }
+
+    // 3. Continue ratcheting in TRAILING phase
+    if (signalPhase === 'TRAILING') {
+      const atr       = activeSignal.volatility?.atr1H ?? riskDist
+      const trail     = atr * 0.5
+      const newSL     = isBuy ? currentPrice - trail : currentPrice + trail
+      const current   = activeSignal.stopLoss
+      if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
+        updateSignalSL(newSL, 'TRAILING')
+      }
+      return
+    }
+
+    // 4. Expire the signal after 4h if TP was never reached
+    const expired = Date.now() > new Date(activeSignal.expiresAt).getTime()
+    if (expired) {
+      closeActiveSignal('EXPIRED')
+    }
+  }
+
   useEffect(() => {
     setConnectionStatus('connecting')
 
@@ -130,12 +187,13 @@ export function useLiveData() {
     syncSession()
 
     timers.current = [
-      setInterval(pollTick,        TICK_INTERVAL_MS),
-      setInterval(pollSignal,      SIGNAL_INTERVAL_MS),
-      setInterval(pollCorrelations, CORR_INTERVAL_MS),
-      setInterval(pollNews,        NEWS_INTERVAL_MS),
-      setInterval(pollEvents,      EVENTS_INTERVAL_MS),
-      setInterval(syncSession,     SESSION_INTERVAL_MS),
+      setInterval(pollTick,              TICK_INTERVAL_MS),
+      setInterval(pollSignal,            SIGNAL_INTERVAL_MS),
+      setInterval(checkSignalManagement, MGMT_INTERVAL_MS),
+      setInterval(pollCorrelations,      CORR_INTERVAL_MS),
+      setInterval(pollNews,              NEWS_INTERVAL_MS),
+      setInterval(pollEvents,            EVENTS_INTERVAL_MS),
+      setInterval(syncSession,           SESSION_INTERVAL_MS),
     ]
 
     return () => {

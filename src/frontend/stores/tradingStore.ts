@@ -2,6 +2,9 @@ import { create } from 'zustand'
 import { devtools, subscribeWithSelector } from 'zustand/middleware'
 import type { Signal, Tick, NewsAlert, EconomicEvent, MarketRegime, SessionType } from '@/types/trading'
 
+export type SignalPhase = 'OPEN' | 'BREAKEVEN' | 'TRAILING'
+export type SignalCloseType = 'TP_HIT' | 'SL_HIT' | 'EXPIRED' | 'TRAILED_SL'
+
 interface TradingState {
   // Live market data
   currentPrice: number
@@ -14,9 +17,10 @@ interface TradingState {
 
   // Signal state
   activeSignal: Signal | null
+  signalPhase: SignalPhase
   signalHistory: Signal[]
   signalCount: number
-  lastSignalResult: { type: 'TP_HIT' | 'SL_HIT'; pnl: number } | null
+  lastSignalResult: { type: SignalCloseType; pnl: number } | null
 
   // Market context
   currentRegime: MarketRegime | null
@@ -45,7 +49,8 @@ interface TradingState {
   setTick: (tick: Tick) => void
   setActiveSignal: (signal: Signal | null) => void
   addSignalToHistory: (signal: Signal) => void
-  closeActiveSignal: (type: 'TP_HIT' | 'SL_HIT') => void
+  updateSignalSL: (newSL: number, phase: SignalPhase) => void
+  closeActiveSignal: (type: SignalCloseType) => void
   setRegime: (regime: MarketRegime) => void
   setSession: (session: SessionType) => void
   addNewsAlert: (news: NewsAlert) => void
@@ -60,7 +65,6 @@ interface TradingState {
 export const useTradingStore = create<TradingState>()(
   devtools(
     subscribeWithSelector((set) => ({
-      // Initial state
       currentPrice: 0,
       bid: 0,
       ask: 0,
@@ -69,6 +73,7 @@ export const useTradingStore = create<TradingState>()(
       priceChangePct: 0,
       lastTickAt: null,
       activeSignal: null,
+      signalPhase: 'OPEN',
       signalHistory: [],
       signalCount: 0,
       lastSignalResult: null,
@@ -106,9 +111,19 @@ export const useTradingStore = create<TradingState>()(
           signalHistory:    isTradeable ? [signal, ...s.signalHistory].slice(0, 100) : s.signalHistory,
           signalCount:      isTradeable ? s.signalCount + 1 : s.signalCount,
           activeSignal:     signal,
-          lastSignalResult: isTradeable ? null : s.lastSignalResult,  // clear result on new tradeable signal
+          signalPhase:      isTradeable ? 'OPEN' : s.signalPhase,
+          lastSignalResult: isTradeable ? null : s.lastSignalResult,
           currentSession:   signal.session ?? s.currentSession,
           currentRegime:    signal.regime  ?? s.currentRegime,
+        }
+      }),
+
+      // Move SL in-place on the active signal (breakeven / trailing)
+      updateSignalSL: (newSL, phase) => set((s) => {
+        if (!s.activeSignal) return {}
+        return {
+          activeSignal: { ...s.activeSignal, stopLoss: Math.round(newSL * 100) / 100 },
+          signalPhase: phase,
         }
       }),
 
@@ -116,12 +131,19 @@ export const useTradingStore = create<TradingState>()(
         if (!s.activeSignal) return {}
         const sig   = s.activeSignal
         const isBuy = sig.direction === 'BUY'
-        const pnl   = type === 'TP_HIT'
-          ? (isBuy ? sig.takeProfit - sig.entryPrice : sig.entryPrice - sig.takeProfit)
-          : (isBuy ? sig.stopLoss   - sig.entryPrice : sig.entryPrice - sig.stopLoss)
+        let pnl: number
+        if (type === 'TP_HIT') {
+          pnl = isBuy ? sig.takeProfit - sig.entryPrice : sig.entryPrice - sig.takeProfit
+        } else if (type === 'EXPIRED') {
+          pnl = 0
+        } else {
+          // SL_HIT or TRAILED_SL — use current (possibly trailed) SL
+          pnl = isBuy ? sig.stopLoss - sig.entryPrice : sig.entryPrice - sig.stopLoss
+        }
         return {
           lastSignalResult: { type, pnl: Math.round(pnl * 100) / 100 },
           activeSignal:     null,
+          signalPhase:      'OPEN',
         }
       }),
 
