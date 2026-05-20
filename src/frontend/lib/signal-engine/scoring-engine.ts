@@ -1,8 +1,8 @@
 import type { GoldFeatures } from './gold-features'
 
 const PIP = 0.01
-const MIN_TARGET = 15
-const MAX_TARGET = 30
+const MIN_TARGET = 40    // $40 minimum TP for XAUUSD H1
+const MAX_TARGET = 150   // $150 maximum TP for XAUUSD H1
 const CONFIDENCE_THRESHOLD = 72
 
 const WEIGHTS = {
@@ -197,12 +197,14 @@ function directionalScore(f: GoldFeatures, buy: boolean): number {
 }
 
 function riskParams(f: GoldFeatures, confidence: number) {
-  const atrPips = f.atrRatio * 1000
-  const slMult  = 0.8 + f.volatilityRegime * 0.7
-  const slPips  = Math.max(500, Math.min(1500, atrPips * slMult))
-  const tpMult  = 2.0 + ((confidence - 72) / 28) * 1.0
-  const tpPips  = Math.max(MIN_TARGET / PIP, Math.min(MAX_TARGET / PIP, slPips * tpMult))
-  const entryOffsetPips = f.obProximityScore > 0.7 ? 0 : f.obProximityScore > 0.4 ? 30 : 0
+  // atr1H is in dollars (e.g. $30). atrRatio = atr1H/10, atrPips = atrRatio*1000 = atr1H*100
+  const atrPips = f.atrRatio * 1000                      // e.g. ATR=$30 → 3000 pips
+  const slMult  = 1.2 + f.volatilityRegime * 0.8        // 1.2× ATR (quiet) → 2.0× ATR (volatile)
+  const slPips  = Math.max(1500, Math.min(6000, atrPips * slMult))  // $15 – $60
+  const tpMult  = 2.2 + ((confidence - 72) / 28) * 0.8  // 2.2× RR (min conf) → 3.0× RR (max conf)
+  const tpPips  = Math.max(MIN_TARGET / PIP, Math.min(MAX_TARGET / PIP, slPips * tpMult))  // $40 – $150
+  // Entry offset: wait for small pullback near OB (100 pips = $1 for gold)
+  const entryOffsetPips = f.obProximityScore > 0.7 ? 0 : f.obProximityScore > 0.4 ? 100 : 0
   return { slPips, tpPips, entryOffsetPips }
 }
 
