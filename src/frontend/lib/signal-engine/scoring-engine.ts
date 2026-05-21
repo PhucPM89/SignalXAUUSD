@@ -39,9 +39,8 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
     news:       scoreNews(features, warnings),
   }
 
-  // Confidence = signal STRENGTH, not directional bias.
-  // Use abs() for directional layers so strong bearish gives same confidence as strong bullish.
-  // The direction is decided separately by directionalScore().
+  // Confidence = signal STRENGTH. abs() on directional layers so strong bearish
+  // setup gives same confidence as strong bullish setup.
   const rawScore =
     Math.abs(layerScores.structure)  * WEIGHTS.structure +
     Math.abs(layerScores.liquidity)  * WEIGHTS.liquidity +
@@ -79,62 +78,91 @@ function applyHardGates(f: GoldFeatures, warnings: string[]): string | null {
 }
 
 function scoreStructure(f: GoldFeatures, bullish: string[], bearish: string[]): number {
+  const isBull = f.htfBullish > 0
   let score = 0
-  if (f.htfBullish > 0) { score += 0.4; bullish.push('H1 bullish market structure intact') }
-  else                  { score -= 0.4; bearish.push('H1 bearish market structure') }
+
+  if (isBull) { score += 0.4; bullish.push('H1 bullish market structure intact') }
+  else        { score -= 0.4; bearish.push('H1 bearish market structure') }
+
   if (f.bosPresent > 0.5) {
-    score += f.htfBullish > 0 ? 0.3 : -0.3
-    ;(f.htfBullish > 0 ? bullish : bearish).push('Break of Structure confirmed')
+    score += isBull ? 0.3 : -0.3
+    ;(isBull ? bullish : bearish).push('Break of Structure confirmed')
   }
+
   if (f.unmitigatedObPresent > 0.5) {
     score += 0.2
-    bullish.push(`Unmitigated ${f.htfBullish > 0 ? 'bullish' : 'bearish'} order block present`)
+    if (isBull) bullish.push('Unmitigated bullish OB acting as demand')
+    else        bearish.push('Unmitigated bearish OB acting as supply')
   }
-  if (f.obProximityScore > 0.7) { score += 0.1; bullish.push('Price within order block zone') }
+
+  if (f.obProximityScore > 0.7) {
+    score += 0.1
+    if (isBull) bullish.push('Price entering bullish OB demand zone')
+    else        bearish.push('Price testing bearish OB supply zone')
+  }
+
   if (f.fvgPresent > 0.5 && f.fvgProximityScore > 0.6) {
-    score += 0.15; bullish.push('Fair Value Gap open — potential fill target')
+    score += 0.15
+    if (isBull) bullish.push('Bullish FVG open — price drawn to fill imbalance')
+    else        bearish.push('Bearish FVG open — price drawn to fill imbalance')
   }
+
   return Math.max(-1, Math.min(1, score))
 }
 
 function scoreLiquidity(f: GoldFeatures, bullish: string[], bearish: string[]): number {
+  const isBull = f.htfBullish > 0
   let score = 0
+
   if (f.liquiditySweepRecent > 0.5) {
     score += 0.6
-    ;(f.htfBullish > 0 ? bullish : bearish).push(
-      f.htfBullish > 0
-        ? 'Sell-side liquidity sweep completed — bullish continuation likely'
-        : 'Buy-side liquidity sweep completed — bearish continuation likely')
+    ;(isBull ? bullish : bearish).push(
+      isBull
+        ? 'Sell-side liquidity sweep completed — smart money loaded long'
+        : 'Buy-side liquidity sweep completed — smart money distributed short')
   }
-  if (f.sslDistancePips > 2000 && f.htfBullish > 0) {
-    score += 0.2; bullish.push('Large SSL buffer below — SL breathing room available')
+  if (f.sslDistancePips > 2000 && isBull) {
+    score += 0.2; bullish.push('Large SSL buffer below — SL breathing room')
   }
-  if (f.liquidityImbalance > 0.3)       { score += 0.2; bullish.push('Liquidity imbalance favours buy side') }
-  else if (f.liquidityImbalance < -0.3) { score += 0.2; bearish.push('Liquidity imbalance favours sell side') }
+  if (f.liquidityImbalance > 0.3)       { score += 0.2; bullish.push('More BSL than SSL — buy-side pressure') }
+  else if (f.liquidityImbalance < -0.3) { score += 0.2; bearish.push('More SSL than BSL — sell-side pressure') }
+
   return Math.max(-1, Math.min(1, score))
 }
 
 function scoreMacro(f: GoldFeatures, bullish: string[], bearish: string[]): number {
   let score = 0
-  if (f.dxyMomentum > 0.3)      { score += 0.35; bullish.push('DXY weakening — bullish Gold impulse') }
-  else if (f.dxyMomentum < -0.3){ score -= 0.35; bearish.push('DXY strengthening — headwind for Gold') }
-  if (f.yieldMomentum > 0.3)      { score += 0.3; bullish.push('US10Y yields declining — supports Gold') }
-  else if (f.yieldMomentum < -0.3){ score -= 0.3; bearish.push('US10Y yields rising — pressure on Gold') }
+
+  // DXY
+  if (f.dxyMomentum > 0.3)       { score += 0.35; bullish.push('DXY weakening — bullish impulse for Gold') }
+  else if (f.dxyMomentum < -0.3) { score -= 0.35; bearish.push('DXY strengthening — headwind for Gold') }
+
+  // Yields
+  if (f.yieldMomentum > 0.3)       { score += 0.30; bullish.push('US10Y yields declining — supports Gold') }
+  else if (f.yieldMomentum < -0.3) { score -= 0.30; bearish.push('US10Y yields rising — pressure on Gold') }
+
+  // Risk sentiment — both directions scored symmetrically
   if (f.riskOffScore > 0.5) {
     score += 0.25; bullish.push(`Risk-off (VIX ${f.vixLevel.toFixed(1)}) — safe-haven demand`)
+  } else if (f.riskOnScore > 0.4) {
+    score -= 0.20; bearish.push(`Risk-on (VIX ${f.vixLevel.toFixed(1)}, SPX bid) — reduces Gold safe-haven demand`)
   }
-  if (f.goldCorrelationScore > 0.6)      { score += 0.1; bullish.push('Multi-factor macro alignment bullish') }
-  else if (f.goldCorrelationScore < 0.2) { score -= 0.1; bearish.push('Macro factors not aligned for Gold') }
+
+  // Composite macro alignment
+  if (f.goldCorrelationScore > 0.6)       { score += 0.10; bullish.push('Multi-factor macro trifecta bullish') }
+  else if (f.goldCorrelationScore < 0.15) { score -= 0.10; bearish.push('Macro factors not supporting Gold') }
+
   return Math.max(-1, Math.min(1, score))
 }
 
 function scoreVolatility(f: GoldFeatures, warnings: string[]): number {
-  if (f.volatilityRegime > 0.3 && f.volatilityRegime < 0.75 && f.atrRatio > 1.0) return 0.8
-  if (f.volatilityRegime < 0.1) {
+  // Ideal: ATR $12–24 (regime 0.28–0.76) with expanding vol
+  if (f.volatilityRegime > 0.28 && f.volatilityRegime < 0.76 && f.atrRatio > 0.8) return 0.8
+  if (f.volatilityRegime < 0.08) {
     warnings.push('Extremely low volatility — avoid entries in dead compression'); return 0.1
   }
-  if (f.volatilityRegime > 0.85) {
-    warnings.push('High volatility regime — widen SL by 20%'); return 0.4
+  if (f.volatilityRegime > 0.88) {
+    warnings.push('Extreme volatility regime — widen SL by 25%'); return 0.4
   }
   return 0.5
 }
@@ -160,25 +188,26 @@ function scoreNews(f: GoldFeatures, warnings: string[]): number {
 }
 
 function directionalScore(f: GoldFeatures, buy: boolean): number {
-  // Neutral factors score 0 — only count active evidence, divide by 7 for both sides
+  // Each factor is in [0,1]; divide by 7 for both sides to keep scale symmetric.
+  // Sell side now has symmetric macro factors — no more BUY bias.
   if (buy) {
     return ([
-      Math.max(0,  f.htfBullish),             // bullish H1 structure
-      Math.max(0,  f.dxyMomentum),            // DXY weakening → gold up
-      Math.max(0,  f.yieldMomentum),          // yields declining → gold up
-      f.riskOffScore,                         // risk-off (VIX spike, SPX sell-off)
-      f.goldCorrelationScore,                 // composite macro alignment
-      Math.max(0,  f.newsSentimentScore),     // positive gold news
+      Math.max(0,  f.htfBullish),            // bullish H1 structure
+      Math.max(0,  f.dxyMomentum),           // DXY weakening → gold up
+      Math.max(0,  f.yieldMomentum),         // yields declining → gold up
+      f.riskOffScore,                        // VIX spike / SPX drop → safe haven
+      f.goldCorrelationScore,                // composite macro alignment score
+      Math.max(0,  f.newsSentimentScore),    // positive gold news
       f.liquiditySweepRecent > 0.5 && f.htfBullish > 0 ? 1 : 0,
     ] as number[]).reduce((s, v) => s + v, 0) / 7
   } else {
     return ([
-      Math.max(0, -f.htfBullish),             // bearish H1 structure
-      Math.max(0, -f.dxyMomentum),            // DXY strengthening → gold down
-      Math.max(0, -f.yieldMomentum),          // yields rising → gold down
-      0,                                      // no symmetric risk-on metric
-      0,                                      // no symmetric gold correlation metric
-      Math.max(0, -f.newsSentimentScore),     // negative gold news
+      Math.max(0, -f.htfBullish),            // bearish H1 structure
+      Math.max(0, -f.dxyMomentum),           // DXY strengthening → gold down
+      Math.max(0, -f.yieldMomentum),         // yields rising → gold down
+      f.riskOnScore,                         // low VIX + SPX bid → risk-on → gold down
+      Math.max(0, 1 - f.goldCorrelationScore), // macro NOT supporting gold
+      Math.max(0, -f.newsSentimentScore),    // negative gold news
       f.liquiditySweepRecent > 0.5 && f.htfBullish < 0 ? 1 : 0,
     ] as number[]).reduce((s, v) => s + v, 0) / 7
   }

@@ -261,16 +261,16 @@ function countMacroAligned(f: ReturnType<typeof extractFeatures>, bull: boolean)
     if (f.yieldMomentum > 0.15) count++
     if (f.riskOffScore > 0.5)   count++
   } else {
-    if (f.dxyMomentum < -0.15)   count++
+    if (f.dxyMomentum < -0.15)  count++
     if (f.yieldMomentum < -0.15) count++
-    if (f.riskOffScore < 0.3)    count++
+    if (f.riskOnScore > 0.3)    count++   // risk-on environment supports SELL
   }
   return count
 }
 
 function isMacroDivergent(f: ReturnType<typeof extractFeatures>, bull: boolean): boolean {
-  if (bull)  return f.dxyMomentum < -0.3 || f.yieldMomentum < -0.3
-  return f.dxyMomentum > 0.3 || f.yieldMomentum > 0.3
+  if (bull)  return f.dxyMomentum < -0.3 || f.yieldMomentum < -0.3 || f.riskOnScore > 0.6
+  return f.dxyMomentum > 0.3 || f.yieldMomentum > 0.3 || f.riskOffScore > 0.6
 }
 
 function buildReasoning(
