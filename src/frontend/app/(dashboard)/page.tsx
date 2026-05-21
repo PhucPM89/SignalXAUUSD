@@ -66,11 +66,11 @@ export default function DashboardPage() {
 
         {/* ── LEFT PANEL ── Signal + Win Rate ──────────────────────────────── */}
         <aside className={cn(
-          'flex-col border-zinc-800 overflow-hidden',
+          'flex-col border-zinc-800 overflow-y-auto',
           // Desktop: always visible, fixed width
-          'lg:w-72 lg:flex-shrink-0 lg:border-r lg:flex',
+          'lg:w-72 lg:flex-shrink-0 lg:border-r lg:flex lg:overflow-hidden lg:overflow-y-auto',
           // Mobile: full panel, scrollable, shown only on signal tab
-          activeTab === 'signal' ? 'flex w-full overflow-y-auto' : 'hidden',
+          activeTab === 'signal' ? 'flex w-full' : 'hidden',
         )}>
           <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-1.5">
@@ -151,7 +151,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Signal history — Firebase-backed, paginated */}
-          <div className="lg:flex-1 lg:min-h-0 border-t border-zinc-800/60 flex flex-col">
+          <div className="border-t border-zinc-800/60 flex-shrink-0">
             <SignalHistoryPanel />
           </div>
         </aside>

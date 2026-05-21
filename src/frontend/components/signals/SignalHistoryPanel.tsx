@@ -86,7 +86,7 @@ export default function SignalHistoryPanel() {
   const slice      = allRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col">
 
       {/* Header + summary stats */}
       <div className="flex items-center justify-between px-3 pt-3 pb-2 flex-shrink-0">
@@ -128,8 +128,8 @@ export default function SignalHistoryPanel() {
         </div>
       )}
 
-      {/* Records list */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      {/* Records list — fixed max-height so it doesn't depend on parent flex */}
+      <div className="overflow-y-auto max-h-[420px]">
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-6 text-[10px] text-zinc-600">
             <Wifi size={11} className="animate-pulse" />
