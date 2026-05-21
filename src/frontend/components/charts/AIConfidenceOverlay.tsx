@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import type { Signal, LayerScores } from '@/types/trading'
 import { cn } from '@/lib/utils'
 
@@ -19,6 +20,33 @@ const LAYER_DEFS: { key: keyof LayerScores; label: string }[] = [
 export default function AIConfidenceOverlay({ signal }: Props) {
   const { layerScores, winRate, confidenceScore, direction } = signal
   const isBuy = direction === 'BUY'
+  const [timeLeft, setTimeLeft] = useState('')
+
+  useEffect(() => {
+    if (!signal.expiresAt) {
+      setTimeLeft('')
+      return
+    }
+
+    function formatRemaining(ms: number) {
+      if (ms <= 0) return 'Expired'
+      const totalSeconds = Math.floor(ms / 1000)
+      const hours = Math.floor(totalSeconds / 3600)
+      const minutes = Math.floor((totalSeconds % 3600) / 60)
+      const seconds = totalSeconds % 60
+
+      if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`
+      if (minutes > 0) return `${minutes}m ${seconds}s`
+      return `${seconds}s`
+    }
+
+    const expiresAt = new Date(signal.expiresAt).getTime()
+    const tick = () => setTimeLeft(formatRemaining(expiresAt - Date.now()))
+
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [signal.expiresAt])
 
   return (
     <div className="absolute top-3 right-3 z-20 pointer-events-none select-none">
@@ -52,6 +80,13 @@ export default function AIConfidenceOverlay({ signal }: Props) {
               <span className="text-[9px] text-zinc-600">P(win)</span>
             </div>
           )}
+        </div>
+
+        <div className="flex items-center justify-between text-[9px] text-zinc-500 mb-1">
+          <span>Expires</span>
+          <span className={cn('font-mono font-semibold', timeLeft === 'Expired' ? 'text-red-400' : 'text-amber-400')}>
+            {timeLeft || '--'}
+          </span>
         </div>
 
         {/* Win-probability bar */}

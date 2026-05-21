@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { TrendingUp, TrendingDown, AlertTriangle, Shield, Clock, Target } from 'lucide-react'
+import { TrendingUp, TrendingDown, AlertTriangle, Shield, Clock } from 'lucide-react'
 import type { Signal } from '@/types/trading'
 import { formatGold, REGIME_COLORS } from '@/types/trading'
 import { cn } from '@/lib/utils'
