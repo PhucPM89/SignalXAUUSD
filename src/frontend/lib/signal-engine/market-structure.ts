@@ -56,15 +56,18 @@ export function analyzeMarketStructure(candles: CandleData[]): MarketStructure {
   }
   if (candles.length < 20) return empty
 
+  // ATR drives adaptive thresholds for OB/FVG/liquidity detection
+  const atr = calcAtrLocal(candles.slice(-14))
+
   const last50 = candles.slice(-50)
   const swingHigh = Math.max(...last50.map(c => c.high))
   const swingLow  = Math.min(...last50.map(c => c.low))
   const current   = candles[candles.length - 1].close
   const bullishStructure = current > (swingHigh + swingLow) / 2
 
-  const orderBlocks    = detectOrderBlocks(candles)
-  const fairValueGaps  = detectFairValueGaps(candles)
-  const liquidityLevels = detectLiquidityLevels(candles)
+  const orderBlocks     = detectOrderBlocks(candles, atr)
+  const fairValueGaps   = detectFairValueGaps(candles, atr)
+  const liquidityLevels = detectLiquidityLevels(candles, atr)
 
   // BOS: broke a meaningful prior swing
   const prior = candles.slice(-100, -10)
@@ -85,7 +88,7 @@ export function analyzeMarketStructure(candles: CandleData[]): MarketStructure {
     orderBlocks, fairValueGaps, liquidityLevels }
 }
 
-function detectOrderBlocks(candles: CandleData[]): OrderBlock[] {
+function detectOrderBlocks(candles: CandleData[], _atr: number): OrderBlock[] {
   const blocks: OrderBlock[] = []
 
   for (let i = 2; i < candles.length - 1; i++) {
@@ -94,18 +97,18 @@ function detectOrderBlocks(candles: CandleData[]): OrderBlock[] {
     const prevBody = Math.abs(prev.close - prev.open)
     const currBody = Math.abs(curr.close - curr.open)
 
-    // Bullish OB: bearish candle followed by strong bullish impulse breaking its high
+    // Bullish OB: bearish candle followed by bullish impulse — wick break is enough (relaxed from close-break)
     if (prev.close < prev.open && curr.close > curr.open &&
-        currBody > prevBody * 1.5 && curr.close > prev.high) {
+        currBody > prevBody * 1.2 && curr.high > prev.high) {
       const isUnmitigated = !candles.slice(i + 1).some(c => c.low <= prev.low)
       blocks.push({ high: prev.high, low: prev.low, isBullish: true, isUnmitigated,
         strength: Math.min(100, Math.round((currBody / Math.max(prevBody, 0.01)) * 50)),
         formedAt: prev.time })
     }
 
-    // Bearish OB: bullish candle followed by strong bearish impulse breaking its low
+    // Bearish OB: bullish candle followed by bearish impulse — wick break is enough
     if (prev.close > prev.open && curr.close < curr.open &&
-        currBody > prevBody * 1.5 && curr.close < prev.low) {
+        currBody > prevBody * 1.2 && curr.low < prev.low) {
       const isUnmitigated = !candles.slice(i + 1).some(c => c.high >= prev.high)
       blocks.push({ high: prev.high, low: prev.low, isBullish: false, isUnmitigated,
         strength: Math.min(100, Math.round((currBody / Math.max(prevBody, 0.01)) * 50)),
@@ -115,9 +118,12 @@ function detectOrderBlocks(candles: CandleData[]): OrderBlock[] {
   return blocks.slice(-10)
 }
 
-function detectFairValueGaps(candles: CandleData[]): FairValueGap[] {
+function detectFairValueGaps(candles: CandleData[], atr: number): FairValueGap[] {
   const fvgs: FairValueGap[] = []
   const PIP = 0.01
+  // Adaptive minimum: at least 15% of ATR in dollar terms
+  // ATR=$10 → min $1.50 = 150 pips; floor at 50 pips to avoid zero on tiny ATR
+  const minPips = Math.max(50, Math.round(atr * 0.15 / PIP))
 
   for (let i = 1; i < candles.length - 1; i++) {
     const c1 = candles[i - 1]
@@ -125,7 +131,7 @@ function detectFairValueGaps(candles: CandleData[]): FairValueGap[] {
 
     if (c1.high < c3.low) {
       const size = (c3.low - c1.high) / PIP
-      if (size >= 5) {
+      if (size >= minPips) {
         const isFilled = candles.slice(i + 1).some(c => c.low <= c1.high)
         fvgs.push({ upperBound: c3.low, lowerBound: c1.high, isBullish: true,
           isFilled, sizePips: size, formedAt: candles[i].time })
@@ -134,7 +140,7 @@ function detectFairValueGaps(candles: CandleData[]): FairValueGap[] {
 
     if (c1.low > c3.high) {
       const size = (c1.low - c3.high) / PIP
-      if (size >= 5) {
+      if (size >= minPips) {
         const isFilled = candles.slice(i + 1).some(c => c.high >= c1.low)
         fvgs.push({ upperBound: c1.low, lowerBound: c3.high, isBullish: false,
           isFilled, sizePips: size, formedAt: candles[i].time })
@@ -144,12 +150,11 @@ function detectFairValueGaps(candles: CandleData[]): FairValueGap[] {
   return fvgs.slice(-5)
 }
 
-function detectLiquidityLevels(candles: CandleData[]): LiquidityLevel[] {
+function detectLiquidityLevels(candles: CandleData[], atr: number): LiquidityLevel[] {
   const levels: LiquidityLevel[] = []
   const recent = candles.slice(-50)
-  // Gold tick size = $0.01; 0.10 (1 tick) was too tight.
-  // 0.30 catches meaningful equal-level clusters for H1 gold without false positives.
-  const TOLERANCE = 0.30
+  // Adaptive tolerance: widens in volatile conditions so equal levels aren't missed
+  const TOLERANCE = Math.max(0.30, atr * 0.02)
 
   for (let i = 0; i < recent.length - 2; i++) {
     for (let j = i + 2; j < recent.length; j++) {
@@ -157,14 +162,12 @@ function detectLiquidityLevels(candles: CandleData[]): LiquidityLevel[] {
         const price = (recent[i].high + recent[j].high) / 2
         if (levels.some(l => Math.abs(l.price - price) < TOLERANCE)) continue
         const isSwept = recent.slice(j + 1).some(c => c.high > recent[j].high + TOLERANCE)
-        // Sweeping above equal highs (BSL) = bullish breakout
         levels.push({ price, isSwept, isBullishSweep: isSwept, description: 'Equal Highs (BSL)' })
       }
       if (Math.abs(recent[i].low - recent[j].low) <= TOLERANCE) {
         const price = (recent[i].low + recent[j].low) / 2
         if (levels.some(l => Math.abs(l.price - price) < TOLERANCE)) continue
         const isSwept = recent.slice(j + 1).some(c => c.low < recent[j].low - TOLERANCE)
-        // Sweeping below equal lows (SSL) = bearish — never a bullish sweep
         levels.push({ price, isSwept, isBullishSweep: false, description: 'Equal Lows (SSL)' })
       }
     }

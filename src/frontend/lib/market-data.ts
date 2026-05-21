@@ -15,14 +15,11 @@ function toYahooParams(tf: string, count: number): { interval: string; range: st
     case 'M15': return { interval: '15m', range: '14d'  }
     case 'M30': return { interval: '30m', range: '14d'  }
     case 'H4': {
-      // H4 downloads 1h bars then filters every 4h — need count×4h of 1h data + 50% buffer.
-      // Previously hardcoded 180d (4320 candles) regardless of count — now dynamic.
       const days = Math.max(10, Math.min(180, Math.ceil(count * 4 / 24 * 1.5)))
       return { interval: '1h', range: `${days}d` }
     }
     case 'D1':  return { interval: '1d',  range: '2y'   }
     default: {
-      // H1: add 50% buffer for weekends/gaps, cap at 60d
       const days = Math.max(5, Math.min(60, Math.ceil(count / 24 * 1.5)))
       return { interval: '1h', range: `${days}d` }
     }
@@ -38,43 +35,106 @@ export interface CandleData {
   volume: number
 }
 
+// ── Stooq — spot XAUUSD (matches TradingView price) ──────────────────────────
+
+async function fetchStooqCandles(timeframe: string, count: number): Promise<CandleData[]> {
+  const interval = timeframe === 'D1' ? 'd' : 'h'
+  const url = `https://stooq.com/q/d/l/?s=xauusd&i=${interval}`
+
+  const ac  = new AbortController()
+  const tid = setTimeout(() => ac.abort(), 5_000)
+  const res = await fetch(url, {
+    cache: 'no-store',
+    signal: ac.signal,
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Signal/1.0)' },
+  }).finally(() => clearTimeout(tid))
+
+  if (!res.ok) throw new Error(`Stooq ${res.status}`)
+  const text = await res.text()
+  if (!text || text.length < 100 || text.trimStart().startsWith('<')) throw new Error('Stooq bad response')
+
+  const lines = text.trim().split('\n')
+  if (lines.length < 2) throw new Error('Stooq no data')
+
+  const headers = lines[0].toLowerCase().split(',').map(h => h.trim())
+  const idx = (n: string) => headers.indexOf(n)
+  const [di, ti, oi, hi, li, ci] = [idx('date'), idx('time'), idx('open'), idx('high'), idx('low'), idx('close')]
+  if (di < 0 || ci < 0) throw new Error('Stooq bad header')
+
+  const candles: CandleData[] = []
+  for (let i = 1; i < lines.length; i++) {
+    const p       = lines[i].split(',')
+    const dateStr = p[di]?.trim()
+    const timeStr = ti >= 0 ? (p[ti]?.trim() ?? '00:00:00') : '00:00:00'
+    if (!dateStr) continue
+
+    const o = parseFloat(p[oi] ?? '')
+    const h = parseFloat(p[hi] ?? '')
+    const l = parseFloat(p[li] ?? '')
+    const c = parseFloat(p[ci] ?? '')
+    if (!(c > 100 && o > 0 && h > 0 && l > 0)) continue
+
+    const dt = new Date(`${dateStr}T${timeStr}Z`)
+    if (isNaN(dt.getTime())) continue
+
+    candles.push({ time: Math.floor(dt.getTime() / 1000), open: o, high: h, low: l, close: c, volume: 0 })
+  }
+
+  if (candles.length < 10) throw new Error('Stooq insufficient data')
+  if (timeframe === 'H4') return aggregateToH4(candles, count)
+  return candles.slice(-count)
+}
+
+// ── Yahoo Finance — GC=F futures fallback (note: ~$5–15 contango premium vs spot) ──
+
+async function fetchYahooCandles(symbol: string, timeframe: string, count: number): Promise<CandleData[]> {
+  const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
+  const { interval, range } = toYahooParams(timeframe, count)
+  const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=${interval}&range=${range}`
+
+  const ac  = new AbortController()
+  const tid = setTimeout(() => ac.abort(), 5_000)
+  const res = await fetch(url, { next: { revalidate: 30 }, signal: ac.signal }).finally(() => clearTimeout(tid))
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`)
+  const data = await res.json()
+  const result = data?.chart?.result?.[0]
+  const timestamps: number[] = result?.timestamp ?? []
+  const quotes = result?.indicators?.quote?.[0]
+  if (!timestamps.length || !quotes) throw new Error('Yahoo no data')
+
+  const raw: CandleData[] = []
+  for (let i = 0; i < timestamps.length; i++) {
+    const o = quotes.open?.[i], h = quotes.high?.[i], l = quotes.low?.[i], c = quotes.close?.[i]
+    if (o == null || h == null || l == null || c == null) continue
+    if (h < l || h < Math.min(o, c) || l > Math.max(o, c)) continue
+    raw.push({ time: timestamps[i], open: o, high: h, low: l, close: c, volume: quotes.volume?.[i] ?? 0 })
+  }
+  if (!raw.length) throw new Error('Yahoo empty result')
+  if (timeframe === 'H4') return aggregateToH4(raw, count)
+  return raw.slice(-count)
+}
+
 export async function fetchCandles(
   symbol: string,
   timeframe: string,
   count: number,
 ): Promise<CandleData[]> {
-  const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
-  const { interval, range } = toYahooParams(timeframe, count)
-  const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=${interval}&range=${range}`
+  if (symbol === 'XAUUSD') {
+    // Race Stooq (spot) and Yahoo (futures) in parallel — prefer Stooq for price accuracy
+    const [stooqRes, yahooRes] = await Promise.allSettled([
+      fetchStooqCandles(timeframe, count),
+      fetchYahooCandles(symbol, timeframe, count),
+    ])
+    const fromStooq = stooqRes.status === 'fulfilled' ? stooqRes.value : []
+    const fromYahoo = yahooRes.status === 'fulfilled' ? yahooRes.value : []
+    if (fromStooq.length >= 10) return fromStooq
+    if (fromYahoo.length >= 10) return fromYahoo
+    return tryTwelveData(symbol, timeframe, count)
+  }
 
+  // Non-XAUUSD symbols use Yahoo directly
   try {
-    const ac  = new AbortController()
-    const tid = setTimeout(() => ac.abort(), 5_000)
-    const res = await fetch(url, { next: { revalidate: 30 }, signal: ac.signal }).finally(() => clearTimeout(tid))
-    if (!res.ok) throw new Error(`Yahoo ${res.status}`)
-    const data = await res.json()
-    const result = data?.chart?.result?.[0]
-    const timestamps: number[] = result?.timestamp ?? []
-    const quotes = result?.indicators?.quote?.[0]
-
-    if (!timestamps.length || !quotes) throw new Error('No data')
-
-    const raw: CandleData[] = []
-    for (let i = 0; i < timestamps.length; i++) {
-      const o = quotes.open?.[i]
-      const h = quotes.high?.[i]
-      const l = quotes.low?.[i]
-      const c = quotes.close?.[i]
-      if (o == null || h == null || l == null || c == null) continue
-      if (h < l || h < Math.min(o, c) || l > Math.max(o, c)) continue
-      raw.push({ time: timestamps[i], open: o, high: h, low: l, close: c,
-        volume: quotes.volume?.[i] ?? 0 })
-    }
-
-    // H4: properly aggregate 4× H1 candles → correct OHLCV per 4-hour window
-    if (timeframe === 'H4') return aggregateToH4(raw, count)
-
-    return raw.slice(-count)
+    return await fetchYahooCandles(symbol, timeframe, count)
   } catch {
     return tryTwelveData(symbol, timeframe, count)
   }

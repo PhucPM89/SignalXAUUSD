@@ -2,10 +2,11 @@
 
 import { useEffect, useRef } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
-import type { SignalCloseType } from '@/stores/tradingStore'
+import type { SignalCloseType, SignalPhase } from '@/stores/tradingStore'
 import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/types/trading'
 
-const TICK_INTERVAL_MS    =    500
+// Tick matches server-side cache TTL — no wasted requests
+const TICK_INTERVAL_MS    = 1_500
 const SIGNAL_INTERVAL_MS  = 30_000
 const MGMT_INTERVAL_MS    = 60_000
 const CORR_INTERVAL_MS    = 60_000
@@ -78,6 +79,9 @@ export function useLiveData() {
 
     closeActiveSignal(type)
 
+    // Clear persisted lifecycle so next signal loads fresh
+    fetch('/api/signals/lifecycle', { method: 'DELETE', cache: 'no-store' }).catch(() => {})
+
     const isBuy = activeSignal.direction === 'BUY'
     let pnl: number
     if (type === 'TP_HIT') {
@@ -112,6 +116,15 @@ export function useLiveData() {
     } catch { /* non-blocking */ }
   }
 
+  function persistLifecycle(id: string, phase: SignalPhase, currentSL: number) {
+    fetch('/api/signals/lifecycle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, phase, currentSL }),
+      cache: 'no-store',
+    }).catch(() => {})
+  }
+
   async function pollSignal() {
     const { activeSignal, currentPrice } = useTradingStore.getState()
 
@@ -141,6 +154,19 @@ export function useLiveData() {
         addSignalToHistory(signal)
         if (signal.regime)  setRegime(signal.regime)
         if (signal.session) setSession(signal.session)
+
+        // Restore persisted lifecycle (phase + trailing SL) after page refresh
+        if (signal.direction === 'BUY' || signal.direction === 'SELL') {
+          try {
+            const lr = await fetch('/api/signals/lifecycle', { cache: 'no-store' })
+            if (lr.ok) {
+              const lifecycle: { id: string; phase: SignalPhase; currentSL: number } | null = await lr.json()
+              if (lifecycle?.id === signal.id) {
+                updateSignalSL(lifecycle.currentSL, lifecycle.phase)
+              }
+            }
+          } catch { /* non-blocking */ }
+        }
       }
     } catch {
       // non-blocking
@@ -219,6 +245,7 @@ export function useLiveData() {
         ? activeSignal.entryPrice - buffer
         : activeSignal.entryPrice + buffer
       updateSignalSL(beSL, 'BREAKEVEN')
+      persistLifecycle(activeSignal.id, 'BREAKEVEN', beSL)
       return
     }
 
@@ -229,6 +256,7 @@ export function useLiveData() {
       const current = activeSignal.stopLoss
       if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
         updateSignalSL(newSL, 'TRAILING')
+        persistLifecycle(activeSignal.id, 'TRAILING', newSL)
       }
       return
     }
@@ -240,6 +268,7 @@ export function useLiveData() {
       const current = activeSignal.stopLoss
       if ((isBuy && newSL > current) || (!isBuy && newSL < current)) {
         updateSignalSL(newSL, 'TRAILING')
+        persistLifecycle(activeSignal.id, 'TRAILING', newSL)
       }
       return
     }
@@ -252,27 +281,49 @@ export function useLiveData() {
   useEffect(() => {
     setConnectionStatus('connecting')
 
-    pollTick()
-    pollSignal()
-    pollCorrelations()
-    pollNews()
-    pollEvents()
-    syncSession()
-    pingPresence()
+    const startPolling = () => {
+      pollTick()
+      pollSignal()
+      pollCorrelations()
+      pollNews()
+      pollEvents()
+      syncSession()
+      pingPresence()
 
-    timers.current = [
-      setInterval(pollTick,              TICK_INTERVAL_MS),
-      setInterval(pollSignal,            SIGNAL_INTERVAL_MS),
-      setInterval(checkSignalManagement, MGMT_INTERVAL_MS),
-      setInterval(pollCorrelations,      CORR_INTERVAL_MS),
-      setInterval(pollNews,              NEWS_INTERVAL_MS),
-      setInterval(pollEvents,            EVENTS_INTERVAL_MS),
-      setInterval(syncSession,           SESSION_INTERVAL_MS),
-      setInterval(pingPresence,          PRESENCE_INTERVAL_MS),
-    ]
+      timers.current = [
+        setInterval(pollTick,              TICK_INTERVAL_MS),
+        setInterval(pollSignal,            SIGNAL_INTERVAL_MS),
+        setInterval(checkSignalManagement, MGMT_INTERVAL_MS),
+        setInterval(pollCorrelations,      CORR_INTERVAL_MS),
+        setInterval(pollNews,              NEWS_INTERVAL_MS),
+        setInterval(pollEvents,            EVENTS_INTERVAL_MS),
+        setInterval(syncSession,           SESSION_INTERVAL_MS),
+        setInterval(pingPresence,          PRESENCE_INTERVAL_MS),
+      ]
+    }
+
+    const stopPolling = () => {
+      timers.current.forEach(clearInterval)
+      timers.current = []
+    }
+
+    // Pause all polling when the tab is hidden; resume on focus
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopPolling()
+        setConnectionStatus('disconnected')
+      } else {
+        setConnectionStatus('connecting')
+        startPolling()
+      }
+    }
+
+    startPolling()
+    document.addEventListener('visibilitychange', handleVisibility)
 
     return () => {
-      timers.current.forEach(clearInterval)
+      stopPolling()
+      document.removeEventListener('visibilitychange', handleVisibility)
       setConnectionStatus('disconnected')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

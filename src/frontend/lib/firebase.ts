@@ -1,7 +1,6 @@
 /**
  * Firebase Realtime Database — thin REST wrapper.
  * No SDK needed; all operations use the public REST API.
- * Database rules must allow the relevant read/write paths.
  */
 
 const DB = 'https://signalxauusd-d1e20-default-rtdb.asia-southeast1.firebasedatabase.app'
@@ -32,10 +31,7 @@ export const fbGet    = <T>(path: string, params?: Record<string, string>) => re
 export const fbSet    = (path: string, value: unknown) => req(path, 'PUT', value)
 export const fbDelete = (path: string) => req(path, 'DELETE')
 
-/** Atomic-ish increment (read → write). Safe for low-traffic sites. */
-export async function fbIncrement(path: string): Promise<number> {
-  const current = await fbGet<number>(path) ?? 0
-  const next = current + 1
-  await fbSet(path, next)
-  return next
+/** Atomic server-side increment using Firebase server values — no read/write race. */
+export function fbIncrement(path: string, delta = 1): Promise<unknown> {
+  return req(path, 'PUT', { '.sv': { increment: delta } })
 }
