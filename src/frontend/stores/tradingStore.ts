@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { devtools, subscribeWithSelector } from 'zustand/middleware'
+import { devtools, subscribeWithSelector, persist, createJSONStorage } from 'zustand/middleware'
 import type { Signal, Tick, NewsAlert, EconomicEvent, MarketRegime, SessionType } from '@/types/trading'
 
 export type SignalPhase = 'OPEN' | 'BREAKEVEN' | 'TRAILING'
@@ -68,7 +68,8 @@ interface TradingState {
 
 export const useTradingStore = create<TradingState>()(
   devtools(
-    subscribeWithSelector((set) => ({
+    persist(
+      subscribeWithSelector((set) => ({
       currentPrice: 0,
       bid: 0,
       ask: 0,
@@ -195,6 +196,24 @@ export const useTradingStore = create<TradingState>()(
       setOnlineUsers: (n) => set({ onlineUsers: n }),
       setTotalVisits: (n) => set({ totalVisits: n }),
     })),
+      {
+        name: 'xauusd-signal-store',
+        storage: createJSONStorage(() => localStorage),
+        // Only persist signal history — live market data is always re-fetched
+        partialize: (state) => ({
+          signalHistory: state.signalHistory,
+          signalCount:   state.signalCount,
+        }),
+        onRehydrateStorage: () => (state) => {
+          if (!state) return
+          // Drop signals older than 7 days so localStorage doesn't grow stale
+          const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+          state.signalHistory = state.signalHistory.filter(
+            s => new Date(s.generatedAt).getTime() > cutoff
+          )
+        },
+      }
+    ),
     { name: 'XAUUSDTradingStore' }
   )
 )
