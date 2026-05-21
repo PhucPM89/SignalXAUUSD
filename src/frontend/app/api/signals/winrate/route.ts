@@ -16,8 +16,10 @@ let _cache: WinRateResponse | null = null
 let _cacheTs = 0
 
 export interface WinRateResponse {
-  buy:  ReturnType<typeof calculateWinRate>
-  sell: ReturnType<typeof calculateWinRate>
+  buy:  number
+  sell: number
+  favored: 'BUY' | 'SELL'
+  favoredPct: number
   context: {
     session:          string
     regime:           string
@@ -101,7 +103,7 @@ export async function GET() {
     const atrCompression = features.atrRatio < 0.5
     const atrExpansion   = features.atrRatio > 1.1   // atr/12 > 1.1 → ATR > ~$13
 
-    // BUY scenario — htf bullish structure is aligned
+    // BUY scenario — compute once, then derive SELL as complement so the pair sums to 100%
     const buyWinRate = calculateWinRate({
       regime:   regimeKey,
       rrRatio:  2.0,
@@ -118,26 +120,16 @@ export async function GET() {
       vixExtreme, atrCompression, atrExpansion,
     })
 
-    // SELL scenario — flipped structure alignment
-    const sellWinRate = calculateWinRate({
-      regime:   regimeKey,
-      rrRatio:  2.0,
-      bosConfirmed: bosPresent,
-      chochAgainst: chochPresent && htfStructure.bullishStructure,
-      obMitigating, obNearby, fvgFilling, fvgNearby,
-      liquiditySwept, equalHighsNearby, mtfConfluence,
-      htfAligned:  !htfStructure.bullishStructure,
-      htfOpposing: htfStructure.bullishStructure,
-      macroAligned:   countMacroAligned(features, false),
-      macroDivergent: isMacroDivergent(features, false),
-      session: sessionKey,
-      eventHiLt1h: false, eventHi1to2h: false, eventMedLt30m: false,
-      vixExtreme, atrCompression, atrExpansion,
-    })
+    const buyPct = buyWinRate.percentage
+    const sellPct = 100 - buyPct
+    const favored: WinRateResponse['favored'] = buyPct >= sellPct ? 'BUY' : 'SELL'
+    const favoredPct = Math.max(buyPct, sellPct)
 
     const result: WinRateResponse = {
-      buy:  buyWinRate,
-      sell: sellWinRate,
+      buy:  buyPct,
+      sell: sellPct,
+      favored,
+      favoredPct,
       context: {
         session, regime,
         vix:          correlations.vix,

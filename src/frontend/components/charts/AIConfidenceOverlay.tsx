@@ -7,13 +7,6 @@ interface Props {
   signal: Signal
 }
 
-const TIER_STYLE: Record<string, string> = {
-  ELITE:    'text-amber-300  border-amber-500/50  bg-amber-500/10',
-  HIGH:     'text-emerald-300 border-emerald-500/50 bg-emerald-500/10',
-  MODERATE: 'text-sky-300    border-sky-500/50    bg-sky-500/10',
-  LOW:      'text-zinc-400   border-zinc-600/50   bg-zinc-800/50',
-}
-
 const LAYER_DEFS: { key: keyof LayerScores; label: string }[] = [
   { key: 'structure',  label: 'Structure'  },
   { key: 'liquidity',  label: 'Liquidity'  },
@@ -26,8 +19,6 @@ const LAYER_DEFS: { key: keyof LayerScores; label: string }[] = [
 export default function AIConfidenceOverlay({ signal }: Props) {
   const { layerScores, winRate, confidenceScore, direction } = signal
   const isBuy = direction === 'BUY'
-  const tier  = winRate?.tier ?? 'MODERATE'
-  const tierStyle = TIER_STYLE[tier] ?? TIER_STYLE.MODERATE
 
   return (
     <div className="absolute top-3 right-3 z-20 pointer-events-none select-none">
@@ -37,9 +28,6 @@ export default function AIConfidenceOverlay({ signal }: Props) {
         <div className="flex items-center justify-between mb-2">
           <span className="text-[9px] text-zinc-500 font-bold uppercase tracking-[0.15em]">
             AI Analysis
-          </span>
-          <span className={cn('text-[9px] font-black px-1.5 py-0.5 rounded border tracking-wider', tierStyle)}>
-            {tier}
           </span>
         </div>
 
@@ -74,10 +62,6 @@ export default function AIConfidenceOverlay({ signal }: Props) {
                 className={cn('h-full rounded-full', isBuy ? 'bg-emerald-500' : 'bg-red-500')}
                 style={{ width: `${winRate.percentage}%`, transition: 'width 0.6s ease' }}
               />
-            </div>
-            <div className="flex justify-between mt-0.5 text-[9px] text-zinc-600">
-              <span>Bayesian</span>
-              <span className="font-mono">RR {signal.riskRewardRatio.toFixed(1)}</span>
             </div>
           </div>
         )}
@@ -128,15 +112,6 @@ export default function AIConfidenceOverlay({ signal }: Props) {
           </>
         )}
 
-        {/* Kelly sizing footer */}
-        {winRate && winRate.quarter_kelly_pct > 0 && (
-          <div className="mt-2.5 pt-2 border-t border-zinc-800/80 flex justify-between items-center">
-            <span className="text-[8px] text-zinc-600">¼-Kelly size</span>
-            <span className="text-[9px] text-amber-400 font-mono font-bold">
-              {winRate.quarter_kelly_pct.toFixed(1)}%
-            </span>
-          </div>
-        )}
       </div>
     </div>
   )

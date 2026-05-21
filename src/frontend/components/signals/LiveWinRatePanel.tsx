@@ -5,28 +5,11 @@ import { useTradingStore } from '@/stores/tradingStore'
 import { cn } from '@/lib/utils'
 import { TrendingUp, TrendingDown, RefreshCw, Zap } from 'lucide-react'
 
-interface WinFactor {
-  key:         string
-  label:       string
-  description: string
-  impact_pct:  number
-  positive:    boolean
-}
-
-interface WinRateResult {
-  regime:            string
-  regime_prior_pct:  number
-  final_probability: number
-  percentage:        number
-  tier:             'ELITE' | 'HIGH' | 'MODERATE' | 'LOW'
-  kelly_fraction:    number
-  quarter_kelly_pct: number
-  factors:           WinFactor[]
-}
-
 interface WinRateData {
-  buy:  WinRateResult
-  sell: WinRateResult
+  buy:  number
+  sell: number
+  favored: 'BUY' | 'SELL'
+  favoredPct: number
   context: {
     session:          string
     regime:           string
@@ -97,26 +80,9 @@ export default function LiveWinRatePanel() {
     )
   }
 
-  const { buy, sell, context } = data
-
-  // ── Directional conviction split (these sum to 100%) ────────────────────────
-  // e.g. buy=80, sell=70 → buyShare=53%, sellShare=47%
-  const totalPct      = buy.percentage + sell.percentage || 1
-  const buyShare      = Math.round(buy.percentage  / totalPct * 100)
-  const sellShare     = 100 - buyShare
-
-  // Active direction = whichever has higher win probability
-  const activeIsBuy   = buy.percentage >= sell.percentage
-  const activePct     = activeIsBuy ? buy.percentage  : sell.percentage
-  const activeTier    = TIER_STYLE[activeIsBuy ? buy.tier : sell.tier] ?? TIER_STYLE.LOW
-  const oppPct        = activeIsBuy ? sell.percentage : buy.percentage
-  const oppLabel      = activeIsBuy ? 'SELL' : 'BUY'
-
-  // Top 5 factors explaining the ACTIVE direction (removes duplicates between sides)
-  const activeFactors = (activeIsBuy ? buy.factors : sell.factors)
-    .slice()
-    .sort((a, b) => Math.abs(b.impact_pct) - Math.abs(a.impact_pct))
-    .slice(0, 5)
+  const { buy, sell, favored, favoredPct, context } = data
+  const activeIsBuy = favored === 'BUY'
+  const activePct = favoredPct
 
   return (
     <div className="bg-zinc-900/80 rounded-lg border border-zinc-800 p-3 space-y-2.5">
@@ -140,18 +106,18 @@ export default function LiveWinRatePanel() {
         <div className="flex items-center justify-between mb-1 text-[9px] font-bold">
           <div className="flex items-center gap-0.5 text-emerald-400">
             <TrendingUp size={8} />
-            <span>BUY {buyShare}%</span>
+            <span>BUY {buy}%</span>
           </div>
           <span className="text-zinc-600 text-[8px]">directional conviction</span>
           <div className="flex items-center gap-0.5 text-red-400">
-            <span>SELL {sellShare}%</span>
+            <span>SELL {sell}%</span>
             <TrendingDown size={8} />
           </div>
         </div>
         <div className="h-2.5 rounded-full bg-zinc-800 overflow-hidden flex">
           <div
             className="h-full bg-emerald-500 transition-all duration-700"
-            style={{ width: `${buyShare}%` }}
+            style={{ width: `${buy}%` }}
           />
           <div
             className="h-full bg-red-500 flex-1 transition-all duration-700"
@@ -160,7 +126,7 @@ export default function LiveWinRatePanel() {
       </div>
 
       {/* Active direction win rate — large card */}
-      <div className={cn('rounded-lg border p-2.5', activeTier.bg, activeTier.border)}>
+      <div className="rounded-lg border p-2.5 border-zinc-700 bg-zinc-900/70">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {activeIsBuy
@@ -170,53 +136,16 @@ export default function LiveWinRatePanel() {
               <p className={cn('text-[9px] font-bold tracking-widest', activeIsBuy ? 'text-emerald-400' : 'text-red-400')}>
                 {activeIsBuy ? 'BUY' : 'SELL'} FAVORED
               </p>
-              <p className="text-[8px] text-zinc-600">win probability if trading</p>
+              <p className="text-[8px] text-zinc-600">single B/S ratio</p>
             </div>
           </div>
           <div className="text-right">
-            <p className={cn('text-[30px] font-mono font-black leading-none', activeTier.text)}>
+            <p className="text-[30px] font-mono font-black leading-none text-white">
               {activePct}<span className="text-[14px]">%</span>
             </p>
-            <p className={cn('text-[8px] font-bold tracking-widest', activeTier.text)}>
-              {activeTier.label}
-            </p>
           </div>
-        </div>
-        {/* Opposing direction small note */}
-        <div className="mt-1.5 pt-1.5 border-t border-zinc-700/40 flex items-center justify-between">
-          <span className="text-[8px] text-zinc-600">
-            {oppLabel} win probability:
-          </span>
-          <span className="text-[9px] font-mono text-zinc-500 font-bold">{oppPct}%</span>
         </div>
       </div>
-
-      {/* Key factors driving the active direction */}
-      {activeFactors.length > 0 && (
-        <div>
-          <p className="text-[9px] text-zinc-600 uppercase tracking-widest mb-1.5 font-bold">
-            Key Factors ({activeIsBuy ? 'BUY' : 'SELL'})
-          </p>
-          <div className="space-y-1">
-            {activeFactors.map(f => (
-              <div key={f.key} className="flex items-center justify-between gap-1">
-                <div className="flex items-center gap-1 min-w-0">
-                  <span className={cn('text-[9px] font-black flex-shrink-0', f.positive ? 'text-emerald-400' : 'text-red-400')}>
-                    {f.positive ? '+' : '−'}
-                  </span>
-                  <span className="text-[10px] text-zinc-400 truncate">{f.label}</span>
-                </div>
-                <span className={cn(
-                  'text-[10px] font-mono font-bold flex-shrink-0',
-                  f.positive ? 'text-emerald-400' : 'text-red-400',
-                )}>
-                  {f.impact_pct > 0 ? '+' : ''}{f.impact_pct.toFixed(1)}%
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Market context footer */}
       <div className="pt-1.5 border-t border-zinc-800/60 space-y-1">
