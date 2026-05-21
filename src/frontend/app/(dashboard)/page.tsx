@@ -151,7 +151,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Signal history — Firebase-backed, paginated */}
-          <div className="lg:flex-1 lg:overflow-hidden border-t border-zinc-800/60 flex flex-col min-h-0">
+          <div className="lg:flex-1 lg:min-h-0 border-t border-zinc-800/60 flex flex-col">
             <SignalHistoryPanel />
           </div>
         </aside>
