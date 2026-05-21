@@ -4,28 +4,20 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import { REGIME_COLORS, formatGold } from '@/types/trading'
 import { cn } from '@/lib/utils'
-import { Wifi, WifiOff, AlertCircle, Globe } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
-// Selective store subscriptions — component only re-renders when its own fields change
 function useStatusBarStore() {
-  const currentPrice      = useTradingStore(s => s.currentPrice)
-  const bid               = useTradingStore(s => s.bid)
-  const ask               = useTradingStore(s => s.ask)
-  const spread            = useTradingStore(s => s.spread)
-  const priceChange24H    = useTradingStore(s => s.priceChange24H)
-  const priceChangePct    = useTradingStore(s => s.priceChangePct)
-  const currentRegime     = useTradingStore(s => s.currentRegime)
-  const currentSession    = useTradingStore(s => s.currentSession)
-  const isConnected       = useTradingStore(s => s.isConnected)
-  const connectionStatus  = useTradingStore(s => s.connectionStatus)
-  const hasHighImpact     = useTradingStore(s => s.hasHighImpactEventSoon)
-  const upcomingEvents    = useTradingStore(s => s.upcomingEvents)
-  const lastTickAt        = useTradingStore(s => s.lastTickAt)
-  const onlineUsers       = useTradingStore(s => s.onlineUsers)
-  const totalVisits       = useTradingStore(s => s.totalVisits)
-  return { currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
-    currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers, totalVisits }
+  const currentPrice   = useTradingStore(s => s.currentPrice)
+  const priceChange24H = useTradingStore(s => s.priceChange24H)
+  const priceChangePct = useTradingStore(s => s.priceChangePct)
+  const currentRegime  = useTradingStore(s => s.currentRegime)
+  const currentSession = useTradingStore(s => s.currentSession)
+  const isConnected    = useTradingStore(s => s.isConnected)
+  const hasHighImpact  = useTradingStore(s => s.hasHighImpactEventSoon)
+  const upcomingEvents = useTradingStore(s => s.upcomingEvents)
+  const onlineUsers    = useTradingStore(s => s.onlineUsers)
+  return { currentPrice, priceChange24H, priceChangePct, currentRegime, currentSession,
+    isConnected, hasHighImpact, upcomingEvents, onlineUsers }
 }
 
 // Live clock — starts at 0 (stable server/client hydration), updates after mount
@@ -41,9 +33,9 @@ function useNow() {
 
 export default function StatusBar() {
   const {
-    currentPrice, bid, ask, spread, priceChange24H, priceChangePct,
-    currentRegime, currentSession, isConnected, connectionStatus,
-    hasHighImpact, upcomingEvents, lastTickAt, onlineUsers, totalVisits,
+    currentPrice, priceChange24H, priceChangePct,
+    currentRegime, currentSession, isConnected,
+    hasHighImpact, upcomingEvents, onlineUsers,
   } = useStatusBarStore()
 
   const now = useNow()
@@ -55,110 +47,78 @@ export default function StatusBar() {
     [upcomingEvents]
   )
 
-  const priceUp = priceChange24H >= 0
+  const priceUp   = priceChange24H >= 0
   const minsUntil = nextEvent
     ? Math.max(0, Math.round((new Date(nextEvent.scheduledAt).getTime() - now) / 60_000))
     : 0
 
   return (
-    <div className="h-10 bg-zinc-900/95 border-b border-zinc-800 flex items-center px-4 gap-4 sm:gap-6 text-xs flex-shrink-0 z-50">
+    <header className="h-10 bg-[#0c0c12] border-b border-zinc-800/60 flex items-center px-4 gap-4 flex-shrink-0 z-50">
 
-      {/* Connection indicator — always visible */}
-      <div className={cn('flex items-center gap-1.5', isConnected ? 'text-emerald-400' : 'text-red-400')}>
-        {isConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
-        <span className="font-medium uppercase tracking-widest text-[10px]">
-          {connectionStatus}
-        </span>
-      </div>
+      {/* Wordmark */}
+      <span className="text-[10px] font-black tracking-[0.18em] text-zinc-600 uppercase select-none hidden sm:block">
+        XAU/USD
+      </span>
 
-      <Divider />
+      <div className="hidden sm:block w-px h-3.5 bg-zinc-800" />
 
-      {/* XAUUSD live price — always visible */}
-      <div className="flex items-center gap-2 sm:gap-3">
-        <span className="text-zinc-400 font-bold text-[10px] tracking-widest">XAUUSD</span>
-        <span className="text-white font-mono font-bold text-sm">
-          {currentPrice > 0 ? formatGold(currentPrice) : '—'}
+      {/* Live price */}
+      <div className="flex items-center gap-2.5">
+        <span className={cn(
+          'font-mono font-bold text-sm tabular-nums',
+          currentPrice > 0 ? 'text-white' : 'text-zinc-600',
+        )}>
+          {currentPrice > 0 ? formatGold(currentPrice) : '———'}
         </span>
         {currentPrice > 0 && (
-          <span className={cn('font-mono text-[11px]', priceUp ? 'text-emerald-400' : 'text-red-400')}>
-            {priceUp ? '+' : ''}{formatGold(priceChange24H)} ({priceUp ? '+' : ''}{priceChangePct.toFixed(2)}%)
+          <span className={cn(
+            'font-mono text-[11px] tabular-nums',
+            priceUp ? 'text-emerald-400' : 'text-red-400',
+          )}>
+            {priceUp ? '+' : ''}{priceChange24H.toFixed(2)}
+            <span className="opacity-50 ml-1 text-[9px]">({priceUp ? '+' : ''}{priceChangePct.toFixed(2)}%)</span>
           </span>
         )}
       </div>
 
-      {/* Secondary info — hidden on mobile, shown sm+ */}
-      <div className="hidden sm:contents">
-        {bid > 0 && (
-          <>
-            <Divider />
-            <div className="flex gap-3 text-[10px]">
-              <span className="text-zinc-500">B <span className="text-zinc-300 font-mono">{formatGold(bid)}</span></span>
-              <span className="text-zinc-500">A <span className="text-zinc-300 font-mono">{formatGold(ask)}</span></span>
-              <span className="text-zinc-500">Spd <span className="text-zinc-300 font-mono">{(spread / 0.01).toFixed(0)}</span></span>
-            </div>
-          </>
-        )}
-        <Divider />
-        <div className="flex items-center gap-2 text-[10px]">
+      {/* Session + regime */}
+      {(currentSession || currentRegime) && (
+        <div className="hidden sm:flex items-center gap-1 text-[10px]">
+          <div className="w-px h-3 bg-zinc-800 mr-2" />
+          {currentSession && <span className="text-zinc-500">{currentSession}</span>}
           {currentRegime && (
             <span className={cn('font-semibold', REGIME_COLORS[currentRegime])}>
-              {currentRegime.toUpperCase()}
+              &middot; {currentRegime}
             </span>
-          )}
-          {currentSession && (
-            <span className="text-zinc-500">{currentSession} Session</span>
           )}
         </div>
-      </div>
+      )}
 
-      {/* High-impact event warning — always visible */}
+      {/* High-impact event */}
       {hasHighImpact && nextEvent && (
-        <>
-          <Divider />
-          <div className="flex items-center gap-1.5 text-amber-400 animate-pulse">
-            <AlertCircle size={11} />
-            <span className="text-[10px] font-bold uppercase">
-              <span className="hidden sm:inline">{nextEvent.name} ({nextEvent.currency}) </span>
-              <span className="sm:hidden">⚠ </span>
-              in {minsUntil}m
-            </span>
-          </div>
-        </>
+        <div className="hidden sm:flex items-center gap-1.5 text-amber-400">
+          <div className="w-px h-3 bg-zinc-800" />
+          <AlertCircle size={9} className="animate-pulse ml-1" />
+          <span className="text-[10px] font-semibold truncate max-w-[180px]">
+            {nextEvent.currency} {nextEvent.name.split(' ').slice(0, 3).join(' ')}
+          </span>
+          <span className="text-[10px] text-amber-400/60 font-mono">{minsUntil}m</span>
+        </div>
       )}
 
       <div className="flex-1" />
 
-      {/* Total visits counter — desktop only */}
-      {totalVisits > 0 && (
-        <div className="hidden sm:flex items-center gap-1 text-[10px]">
-          <Globe size={10} className="text-zinc-600" />
-          <span className="text-zinc-500 font-mono">{totalVisits.toLocaleString()}</span>
-          <span className="text-zinc-600">visits</span>
-        </div>
-      )}
-
-      {/* Online users counter */}
-      {onlineUsers > 0 && (
-        <div className="flex items-center gap-1 text-[10px]">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-zinc-400 font-mono font-semibold">{onlineUsers}</span>
-          <span className="hidden sm:inline text-zinc-600">online</span>
-        </div>
-      )}
-
-      {/* Last tick — hidden on mobile */}
-      {lastTickAt && (
-        <>
-          <div className="hidden sm:block"><Divider /></div>
-          <span className="hidden sm:block text-zinc-600 text-[10px] font-mono">
-            {new Date(lastTickAt).toLocaleTimeString('en-US', { hour12: false })} UTC
-          </span>
-        </>
-      )}
-    </div>
+      {/* Online + connection */}
+      <div className="flex items-center gap-2">
+        {onlineUsers > 0 && (
+          <span className="text-zinc-500 font-mono text-[10px] tabular-nums">{onlineUsers} online</span>
+        )}
+        <span className={cn(
+          'w-1.5 h-1.5 rounded-full flex-shrink-0',
+          isConnected ? 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.5)]' : 'bg-red-500',
+          isConnected && 'animate-pulse',
+        )} />
+      </div>
+    </header>
   )
-}
-
-function Divider() {
-  return <div className="h-4 w-px bg-zinc-700" />
 }

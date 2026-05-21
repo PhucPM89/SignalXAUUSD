@@ -19,42 +19,38 @@ export default function NewsPanel() {
   ).length
 
   return (
-    <div className="flex flex-col h-full bg-zinc-900/80 rounded-lg border border-zinc-800 overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
       {/* Tab header */}
-      <div className="flex border-b border-zinc-800 text-[10px] font-bold uppercase tracking-widest flex-shrink-0">
+      <div className="flex border-b border-zinc-800/60 flex-shrink-0">
         <button
           onClick={() => setActiveTab('news')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-2 transition-colors',
+            'flex items-center gap-1 px-3 py-2 text-[9px] font-bold uppercase tracking-widest transition-colors',
             activeTab === 'news'
-              ? 'text-amber-400 border-b-2 border-amber-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              ? 'text-zinc-200 border-b border-zinc-400'
+              : 'text-zinc-600 hover:text-zinc-400',
           )}
         >
-          <Newspaper size={10} />
-          News Feed
+          <Newspaper size={9} />
+          News
           {newsAlerts.length > 0 && (
-            <span className="ml-1 bg-zinc-700 text-zinc-300 rounded-full px-1 text-[9px]">
-              {newsAlerts.length}
-            </span>
+            <span className="ml-1 text-zinc-600 font-mono text-[8px]">{newsAlerts.length}</span>
           )}
         </button>
 
         <button
           onClick={() => setActiveTab('calendar')}
           className={cn(
-            'flex items-center gap-1.5 px-3 py-2 transition-colors',
+            'flex items-center gap-1 px-3 py-2 text-[9px] font-bold uppercase tracking-widest transition-colors',
             activeTab === 'calendar'
-              ? 'text-amber-400 border-b-2 border-amber-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              ? 'text-zinc-200 border-b border-zinc-400'
+              : 'text-zinc-600 hover:text-zinc-400',
           )}
         >
-          <Calendar size={10} />
+          <Calendar size={9} />
           Calendar
           {highImpactCount > 0 && (
-            <span className="ml-1 bg-red-500/20 text-red-400 rounded-full px-1 text-[9px]">
-              {highImpactCount}
-            </span>
+            <span className="ml-1 text-red-400 font-mono text-[8px]">{highImpactCount}</span>
           )}
         </button>
       </div>
@@ -131,26 +127,24 @@ function NewsFeed({ alerts }: { alerts: NewsAlert[] }) {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/50">
+    <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/30">
       {alerts.slice(0, 30).map((news, i) => (
-        <div key={i} className="px-3 py-2 hover:bg-zinc-800/30 transition-colors">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-[11px] text-zinc-200 leading-snug flex-1">{news.headline}</p>
-            <span className={cn('text-[9px] font-bold uppercase whitespace-nowrap pt-0.5', IMPACT_COLORS[news.impact])}>
+        <div key={i} className="px-3 py-2 hover:bg-zinc-800/20 transition-colors">
+          <div className="flex items-start justify-between gap-2 mb-0.5">
+            <p className="text-[10px] text-zinc-300 leading-snug flex-1">{news.headline}</p>
+            <span className={cn('text-[8px] font-bold uppercase whitespace-nowrap pt-0.5 flex-shrink-0', IMPACT_COLORS[news.impact])}>
               {news.impact}
             </span>
           </div>
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-[9px] text-zinc-600">{news.source}</span>
-            <span className="text-[9px] text-zinc-700">•</span>
-            <span className="text-[9px] text-zinc-600">
-              {formatDistanceToNow(new Date(news.publishedAt), { addSuffix: true })}
-            </span>
+          <div className="flex items-center gap-1.5 text-[8px] text-zinc-600">
+            <span>{news.source}</span>
+            <span className="text-zinc-800">·</span>
+            <span>{formatDistanceToNow(new Date(news.publishedAt), { addSuffix: true })}</span>
             {news.sentimentScore !== 0 && (
               <>
-                <span className="text-[9px] text-zinc-700">•</span>
-                <span className={cn('text-[9px]', news.sentimentScore > 0 ? 'text-emerald-500' : 'text-red-500')}>
-                  {news.sentimentScore > 0 ? '↑ Bullish Gold' : '↓ Bearish Gold'}
+                <span className="text-zinc-800">·</span>
+                <span className={news.sentimentScore > 0 ? 'text-emerald-500/70' : 'text-red-500/70'}>
+                  {news.sentimentScore > 0 ? '↑ Bullish' : '↓ Bearish'}
                 </span>
               </>
             )}

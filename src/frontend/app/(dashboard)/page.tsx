@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLiveData } from '@/hooks/useLiveData'
 import { useTradingStore } from '@/stores/tradingStore'
 import StatusBar from '@/components/layout/StatusBar'
@@ -9,11 +9,8 @@ import SignalCard from '@/components/signals/SignalCard'
 import CorrelationPanel from '@/components/macro/CorrelationPanel'
 import NewsPanel from '@/components/news/NewsPanel'
 import SignalHistoryPanel from '@/components/signals/SignalHistoryPanel'
-import { SessionPanel } from '@/components/panels/SessionPanel'
-import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
 import { cn } from '@/lib/utils'
-import { calcAtr } from '@/lib/market-data'
-import type { Candle, Volatility } from '@/types/trading'
+import type { Candle } from '@/types/trading'
 import { Activity, BarChart2, Globe } from 'lucide-react'
 
 type MobileTab = 'signal' | 'chart' | 'market'
@@ -35,25 +32,6 @@ export default function DashboardPage() {
     } catch { /* non-fatal */ }
   }
 
-  const basicVolatility = useMemo<Volatility | undefined>(() => {
-    if (candles.length < 20) return undefined
-    const atr1H = calcAtr(candles.slice(-50))
-    const atr4H = calcAtr(candles.slice(-14)) * 2.2
-    const prices = candles.slice(-20).map(c => c.close)
-    const high20 = Math.max(...prices)
-    const low20  = Math.min(...prices)
-    const adrPct = ((high20 - low20) / low20) * 100
-    const recent5  = calcAtr(candles.slice(-5))
-    const recent20 = calcAtr(candles.slice(-20))
-    return {
-      atr1H, atr4H,
-      adrPercent:    adrPct,
-      isExpanding:   recent5 > recent20 * 1.15,
-      isContracting: recent5 < recent20 * 0.85,
-      regime:        recent5 > recent20 * 1.15 ? 'Expanding' : recent5 < recent20 * 0.85 ? 'Contracting' : 'Normal',
-    }
-  }, [candles])
-
   const hasActiveSignal = activeSignal && activeSignal.direction !== 'NOTRADE'
 
   return (
@@ -63,73 +41,58 @@ export default function DashboardPage() {
       {/* Main content — 3-column desktop / single-panel mobile */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
 
-        {/* ── LEFT PANEL ── Signal + Win Rate ──────────────────────────────── */}
+        {/* ── LEFT PANEL ── Signal + History ───────────────────────────────── */}
         <aside className={cn(
           'flex-col border-zinc-800 overflow-y-auto',
-          // Desktop: always visible, fixed width
-          'lg:w-72 lg:flex-shrink-0 lg:border-r lg:flex lg:overflow-hidden lg:overflow-y-auto',
-          // Mobile: full panel, scrollable, shown only on signal tab
+          'lg:w-[17rem] lg:flex-shrink-0 lg:border-r lg:flex',
           activeTab === 'signal' ? 'flex w-full' : 'hidden',
         )}>
-          <div className="px-3 py-2 border-b border-zinc-800 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-1.5">
-              <Activity size={12} className="text-amber-400" />
-              <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
-                Signal Engine
-              </span>
-            </div>
-            <div className={cn(
-              'h-2 w-2 rounded-full',
-              isConnected ? 'bg-emerald-500 shadow-emerald-500/50 shadow' : 'bg-red-500'
-            )} />
-          </div>
 
-          {/* TP / SL result banner */}
+          {/* Result banner — TP or SL hit */}
           {lastSignalResult && (
             <div className={cn(
-              'mx-3 mt-3 rounded-lg border p-3 text-center flex-shrink-0',
+              'mx-3 mt-3 rounded-lg border px-3 py-2 flex items-center justify-between flex-shrink-0',
               lastSignalResult.type === 'TP_HIT'
-                ? 'bg-emerald-500/10 border-emerald-500/30'
-                : 'bg-red-500/10 border-red-500/30'
+                ? 'bg-emerald-500/8 border-emerald-500/25'
+                : 'bg-red-500/8 border-red-500/25',
             )}>
-              <p className={cn(
-                'text-xs font-bold uppercase tracking-widest',
-                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400'
+              <span className={cn(
+                'text-[9px] font-bold uppercase tracking-widest',
+                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400',
               )}>
-                {lastSignalResult.type === 'TP_HIT' ? '✓ Take Profit Hit' : '✗ Stop Loss Hit'}
-              </p>
-              <p className={cn(
-                'text-lg font-mono font-black mt-0.5',
-                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400'
+                {lastSignalResult.type === 'TP_HIT' ? 'Take Profit' : 'Stop Loss'}
+              </span>
+              <span className={cn(
+                'text-sm font-mono font-black tabular-nums',
+                lastSignalResult.type === 'TP_HIT' ? 'text-emerald-400' : 'text-red-400',
               )}>
                 {lastSignalResult.pnl >= 0 ? '+' : ''}{lastSignalResult.pnl.toFixed(2)}
-              </p>
+              </span>
             </div>
           )}
 
           {/* No-trade state */}
           {(!activeSignal || activeSignal.direction === 'NOTRADE') && (
-            <div className="mx-3 mt-3 bg-zinc-800/40 border border-zinc-700/50 rounded-lg p-4 text-center flex-shrink-0">
-              <div className="text-2xl mb-1">—</div>
-              <p className="text-[11px] text-zinc-400 font-semibold">NO TRADE</p>
-              <p className="text-[10px] text-zinc-600 mt-1">
+            <div className="mx-3 mt-3 border border-zinc-800/60 rounded-lg px-3 py-4 text-center flex-shrink-0">
+              <p className="text-[10px] text-zinc-500 font-semibold uppercase tracking-widest">No Trade</p>
+              <p className="text-[10px] text-zinc-700 mt-1 leading-relaxed">
                 {hasHighImpactEventSoon
-                  ? 'High-impact event imminent — standing aside'
-                  : activeSignal?.reasoning?.htfBias
-                    || 'Waiting for institutional-grade setup'}
+                  ? 'High-impact event — standing aside'
+                  : activeSignal?.reasoning?.htfBias || 'Scanning for setup…'}
               </p>
             </div>
           )}
 
-          {/* Active BUY / SELL signal */}
+          {/* Active signal + phase badge */}
           {activeSignal && activeSignal.direction !== 'NOTRADE' && (
             <div className="px-3 pt-3 flex-shrink-0">
-              <div className="flex items-center gap-2 mb-1.5">
+              {/* Phase badge — inline above card */}
+              <div className="flex items-center gap-1.5 mb-2">
                 <span className={cn(
-                  'text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border',
-                  signalPhase === 'OPEN'      && 'text-sky-400 border-sky-400/40 bg-sky-400/10',
-                  signalPhase === 'BREAKEVEN' && 'text-amber-400 border-amber-400/40 bg-amber-400/10',
-                  signalPhase === 'TRAILING'  && 'text-emerald-400 border-emerald-400/40 bg-emerald-400/10',
+                  'text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded border',
+                  signalPhase === 'OPEN'      && 'text-sky-400/80   border-sky-400/20   bg-sky-400/5',
+                  signalPhase === 'BREAKEVEN' && 'text-amber-400/80 border-amber-400/20 bg-amber-400/5',
+                  signalPhase === 'TRAILING'  && 'text-emerald-400/80 border-emerald-400/20 bg-emerald-400/5',
                 )}>
                   {signalPhase === 'OPEN' ? 'Open' : signalPhase === 'BREAKEVEN' ? 'Breakeven' : 'Trailing SL'}
                 </span>
@@ -144,8 +107,8 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Signal history — Firebase-backed, paginated */}
-          <div className="border-t border-zinc-800/60 flex-shrink-0">
+          {/* Signal history */}
+          <div className="mt-3 border-t border-zinc-800/40 flex-shrink-0">
             <SignalHistoryPanel />
           </div>
         </aside>
@@ -163,26 +126,15 @@ export default function DashboardPage() {
           />
         </main>
 
-        {/* ── RIGHT PANEL ── Macro + Session + Volatility + News ───────── */}
+        {/* ── RIGHT PANEL ── Macro + News ──────────────────────────────── */}
         <aside className={cn(
-          'flex-col border-zinc-800 overflow-hidden',
-          // Desktop: always visible, fixed width
-          'lg:w-80 lg:flex-shrink-0 lg:border-l lg:flex',
-          // Mobile: full panel, scrollable, shown only on market tab
+          'flex-col border-zinc-800',
+          'lg:w-[17rem] lg:flex-shrink-0 lg:border-l lg:flex',
           activeTab === 'market' ? 'flex w-full overflow-y-auto' : 'hidden',
         )}>
-          {/* Correlations */}
-          <div className="flex-shrink-0 border-b border-zinc-800 p-3">
+          <div className="flex-shrink-0 border-b border-zinc-800/40 px-3 pt-3 pb-3">
             <CorrelationPanel />
           </div>
-          {/* Session + Volatility — capped on desktop so News always shows; natural on mobile */}
-          <div className="flex-shrink-0 overflow-y-auto border-b border-zinc-800 lg:max-h-[36%] no-scrollbar">
-            <div className="p-3 space-y-3">
-              <SessionPanel />
-              <VolatilityPanel volatility={activeSignal?.volatility ?? basicVolatility} />
-            </div>
-          </div>
-          {/* News — fills remaining height on desktop, natural height on mobile */}
           <div className="lg:flex-1 lg:overflow-hidden min-h-64">
             <NewsPanel />
           </div>

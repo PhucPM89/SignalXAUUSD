@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useTradingStore } from '@/stores/tradingStore'
 import { cn } from '@/lib/utils'
 import type { ClosedSignalRecord, Signal } from '@/types/trading'
-import { History, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Minus, Wifi } from 'lucide-react'
+import { History, ChevronLeft, ChevronRight, Wifi } from 'lucide-react'
 
 const PAGE_SIZE = 10
 
@@ -181,67 +181,54 @@ function SignalRow({ row }: { row: DisplayRow }) {
 
   return (
     <div className={cn(
-      'border rounded-lg p-2 text-[10px] transition-colors',
+      'rounded-lg border px-2.5 py-2 transition-colors',
       row.isActive
-        ? 'bg-amber-400/5 border-amber-400/20 hover:bg-amber-400/10'
-        : 'bg-zinc-800/30 border-zinc-700/30 hover:bg-zinc-800/50',
+        ? 'bg-amber-400/5 border-amber-400/15'
+        : 'bg-zinc-800/20 border-zinc-800/60 hover:border-zinc-700/60',
     )}>
-      {/* Row 1: direction + status + date */}
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5">
+
+      {/* Line 1: dir · result · PnL ──────── date */}
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <span className={cn(
-            'font-bold text-[9px] px-1.5 py-0.5 rounded-full border',
-            isBuy ? 'text-emerald-400 bg-emerald-400/10 border-emerald-400/30'
-                  : 'text-red-400 bg-red-400/10 border-red-400/30',
+            'text-[9px] font-bold tracking-widest flex-shrink-0',
+            isBuy ? 'text-emerald-400' : 'text-red-400',
           )}>
             {row.dir}
           </span>
+          <span className="text-zinc-700 text-[8px]">·</span>
 
           {isClosed ? (
-            <span className={cn(
-              'text-[9px] font-bold px-1.5 py-0.5 rounded border',
-              RESULT_COLOR[row.result!] ?? 'text-zinc-500 bg-zinc-500/10 border-zinc-500/30',
-            )}>
+            <span className={cn('text-[9px] font-bold', RESULT_COLOR[row.result!]?.split(' ')[0])}>
               {RESULT_LABEL[row.result!] ?? row.result}
             </span>
           ) : row.isActive ? (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border text-amber-400 bg-amber-400/10 border-amber-400/30 animate-pulse">
-              LIVE
-            </span>
+            <span className="text-[9px] font-bold text-amber-400 animate-pulse">LIVE</span>
           ) : (
-            <span className="text-[9px] px-1.5 py-0.5 rounded border text-zinc-600 border-zinc-700/50">
-              REPLACED
-            </span>
+            <span className="text-[9px] text-zinc-700">OLD</span>
+          )}
+
+          {isClosed && row.pnl !== null && (
+            <>
+              <span className="text-zinc-700 text-[8px]">·</span>
+              <span className={cn(
+                'text-[10px] font-mono font-bold tabular-nums',
+                isProfit ? 'text-emerald-400' : isLoss ? 'text-red-400' : 'text-zinc-600',
+              )}>
+                {row.pnl > 0 ? '+' : ''}{row.pnl.toFixed(2)}
+              </span>
+            </>
           )}
         </div>
-        <span className="text-zinc-600 font-mono text-[9px]">{formatDate(row.at)}</span>
+        <span className="text-[8px] text-zinc-700 font-mono flex-shrink-0">{formatDate(row.at)}</span>
       </div>
 
-      {/* Row 2: E / SL / TP / R:R */}
-      <div className="flex items-center gap-3 mb-1.5 font-mono">
-        <span className="text-zinc-600">E <span className="text-zinc-200 font-semibold">{row.entry.toFixed(2)}</span></span>
-        <span className="text-zinc-600">SL <span className="text-red-400/80">{row.sl.toFixed(2)}</span></span>
-        <span className="text-zinc-600">TP <span className="text-emerald-400/80">{row.tp.toFixed(2)}</span></span>
-        <span className="text-zinc-600 ml-auto">R:R <span className="text-zinc-400">{row.rr.toFixed(1)}</span></span>
-      </div>
-
-      {/* Row 3: PnL (closed) OR confidence (open) */}
-      <div className="flex items-center justify-between">
-        {isClosed ? (
-          <div className={cn(
-            'flex items-center gap-1 font-mono font-bold text-[11px]',
-            isProfit ? 'text-emerald-400' : isLoss ? 'text-red-400' : 'text-zinc-500',
-          )}>
-            {isProfit ? <TrendingUp size={11} /> : isLoss ? <TrendingDown size={11} /> : <Minus size={11} />}
-            <span>{row.pnl! > 0 ? '+' : ''}{row.pnl!.toFixed(2)} pts</span>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1 text-zinc-600 text-[9px]">
-            <Minus size={10} />
-            <span>Chưa đóng</span>
-          </div>
-        )}
-        <span className="text-zinc-700 font-mono text-[9px]">{row.conf}% conf</span>
+      {/* Line 2: E / SL / TP · R:R · conf */}
+      <div className="flex items-center gap-2 font-mono text-[9px] text-zinc-600">
+        <span>E <span className="text-zinc-300">{row.entry.toFixed(2)}</span></span>
+        <span>SL <span className="text-red-400/70">{row.sl.toFixed(2)}</span></span>
+        <span>TP <span className="text-emerald-400/70">{row.tp.toFixed(2)}</span></span>
+        <span className="ml-auto text-zinc-700">{row.rr.toFixed(1)}R · {row.conf}%</span>
       </div>
     </div>
   )

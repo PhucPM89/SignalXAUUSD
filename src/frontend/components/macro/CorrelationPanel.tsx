@@ -2,116 +2,73 @@
 
 import { useTradingStore } from '@/stores/tradingStore'
 import { cn } from '@/lib/utils'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
-/**
- * XAUUSD Correlation Panel
- *
- * Gold has specific, well-documented inverse relationships:
- *  - DXY ↑ → Gold ↓  (Dollar strength reduces Gold attractiveness)
- *  - US10Y ↑ → Gold ↓  (Higher real yields increase opportunity cost of holding Gold)
- *  - VIX ↑ → Gold ↑  (Fear/risk-off increases safe-haven demand)
- *  - SPX ↑ → Gold ↓  (Risk-on reduces safe-haven demand)
- *
- * Color coding follows Gold's directional implication, not the raw change.
- */
 export default function CorrelationPanel() {
   const { dxyValue, dxyChange, us10YYield, vix, isRiskOff } = useTradingStore()
 
   return (
-    <div className="bg-zinc-900/80 rounded-lg border border-zinc-800 p-3">
-      <h3 className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mb-3">
-        Macro Correlations — Gold Impact
-      </h3>
-
-      <div className="space-y-2">
-        <CorrelationRow
+    <div className="space-y-2.5">
+      <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Macro Context</p>
+      <div className="grid grid-cols-3 gap-2">
+        <MacroCell
           label="DXY"
-          sublabel="US Dollar Index"
-          value={dxyValue.toFixed(3)}
+          value={dxyValue.toFixed(2)}
           change={dxyChange}
-          changeLabel={dxyChange >= 0 ? `+${dxyChange.toFixed(3)}` : dxyChange.toFixed(3)}
-          goldImpact={dxyChange > 0.1 ? 'bearish' : dxyChange < -0.1 ? 'bullish' : 'neutral'}
-          goldImpactLabel={dxyChange > 0.1 ? 'Bearish Gold' : dxyChange < -0.1 ? 'Bullish Gold' : 'Neutral'}
+          changeInverted  // DXY up = bad for gold
         />
-
-        <CorrelationRow
+        <MacroCell
           label="US10Y"
-          sublabel="10-Year Treasury Yield"
-          value={`${us10YYield.toFixed(3)}%`}
-          change={0}
-          changeLabel=""
-          goldImpact={us10YYield > 4.5 ? 'bearish' : us10YYield < 3.5 ? 'bullish' : 'neutral'}
-          goldImpactLabel={us10YYield > 4.5 ? 'Yield Headwind' : us10YYield < 3.5 ? 'Yield Tailwind' : 'Neutral'}
+          value={`${us10YYield.toFixed(2)}%`}
+          bullishForGold={us10YYield < 3.8}
+          bearishForGold={us10YYield > 4.5}
         />
-
-        <CorrelationRow
+        <MacroCell
           label="VIX"
-          sublabel="Volatility Index"
           value={vix.toFixed(1)}
-          change={0}
-          changeLabel=""
-          goldImpact={vix > 25 ? 'bullish' : vix < 15 ? 'bearish' : 'neutral'}
-          goldImpactLabel={vix > 25 ? 'Risk-Off → Gold ↑' : vix < 15 ? 'Risk-On → Gold ↓' : 'Normal'}
+          bullishForGold={vix > 25}
+          bearishForGold={vix < 15}
         />
       </div>
-
-      {/* Risk sentiment summary */}
-      <div className={cn(
-        'mt-3 rounded-lg px-3 py-2 text-[11px] font-semibold text-center',
-        isRiskOff
-          ? 'bg-amber-500/15 border border-amber-500/30 text-amber-400'
-          : 'bg-zinc-800/60 border border-zinc-700 text-zinc-400'
-      )}>
-        {isRiskOff ? '⚠ RISK-OFF ENVIRONMENT — Safe-Haven Demand Elevated' : 'Risk-On / Neutral Environment'}
-      </div>
+      {isRiskOff && (
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/8 border border-amber-500/20 rounded-lg">
+          <span className="w-1 h-1 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+          <span className="text-[9px] text-amber-400 font-bold tracking-wider">RISK-OFF · Safe-haven demand elevated</span>
+        </div>
+      )}
     </div>
   )
 }
 
-type GoldImpact = 'bullish' | 'bearish' | 'neutral'
-
-function CorrelationRow({
-  label, sublabel, value, change, changeLabel,
-  goldImpact, goldImpactLabel
+function MacroCell({
+  label, value, change, changeInverted, bullishForGold, bearishForGold,
 }: {
   label: string
-  sublabel: string
   value: string
-  change: number
-  changeLabel: string
-  goldImpact: GoldImpact
-  goldImpactLabel: string
+  change?: number
+  changeInverted?: boolean
+  bullishForGold?: boolean
+  bearishForGold?: boolean
 }) {
-  const impactColor: Record<GoldImpact, string> = {
-    bullish: 'text-emerald-400',
-    bearish: 'text-red-400',
-    neutral: 'text-zinc-400',
-  }
+  // For change-based coloring (DXY): invert means DXY down = bullish gold
+  const isUpChange   = (change ?? 0) > 0.005
+  const isDownChange = (change ?? 0) < -0.005
+  const effectiveBull = changeInverted ? isDownChange : (bullishForGold ?? false)
+  const effectiveBear = changeInverted ? isUpChange  : (bearishForGold ?? false)
 
-  const Icon = change > 0 ? TrendingUp : change < 0 ? TrendingDown : Minus
+  const valueColor = effectiveBull ? 'text-emerald-400' : effectiveBear ? 'text-red-400' : 'text-zinc-300'
+  const arrow = change !== undefined
+    ? (Math.abs(change) > 0.005 ? (change > 0 ? '↑' : '↓') : '')
+    : ''
+  const arrowColor = changeInverted
+    ? (change! > 0 ? 'text-red-400' : 'text-emerald-400')
+    : (change! > 0 ? 'text-emerald-400' : 'text-red-400')
 
   return (
-    <div className="flex items-center justify-between py-1.5 border-b border-zinc-800/60 last:border-0">
-      <div>
-        <span className="text-white text-xs font-semibold">{label}</span>
-        <span className="text-zinc-500 text-[10px] ml-1.5">{sublabel}</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1 text-[11px]">
-          <span className="text-zinc-300 font-mono">{value}</span>
-          {changeLabel && (
-            <span className={cn(
-              'font-mono',
-              change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-zinc-400'
-            )}>
-              {changeLabel}
-            </span>
-          )}
-        </div>
-        <span className={cn('text-[10px] font-semibold px-1.5 py-0.5 rounded bg-zinc-800', impactColor[goldImpact])}>
-          {goldImpactLabel}
-        </span>
+    <div className="bg-zinc-800/40 rounded-lg p-2.5">
+      <p className="text-[9px] text-zinc-600 font-bold tracking-widest mb-1">{label}</p>
+      <div className="flex items-baseline gap-1">
+        <span className={cn('font-mono font-bold text-xs tabular-nums', valueColor)}>{value}</span>
+        {arrow && <span className={cn('text-[9px]', arrowColor)}>{arrow}</span>}
       </div>
     </div>
   )
