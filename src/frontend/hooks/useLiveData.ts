@@ -6,7 +6,7 @@ import type { SignalCloseType, SignalPhase } from '@/stores/tradingStore'
 import type { Signal, Tick, NewsAlert, EconomicEvent, SessionType } from '@/types/trading'
 
 // Tick matches server-side cache TTL — no wasted requests
-const TICK_INTERVAL_MS    = 1_500
+const TICK_INTERVAL_MS    = 1_000
 const SIGNAL_INTERVAL_MS  = 30_000
 const MGMT_INTERVAL_MS    = 60_000
 const CORR_INTERVAL_MS    = 60_000
@@ -128,21 +128,17 @@ export function useLiveData() {
     const { activeSignal, currentPrice } = useTradingStore.getState()
 
     if (activeSignal && (activeSignal.direction === 'BUY' || activeSignal.direction === 'SELL')) {
-      const expired = Date.now() > new Date(activeSignal.expiresAt).getTime()
+      const isBuy = activeSignal.direction === 'BUY'
+      const slHit = currentPrice > 0 && (isBuy
+        ? currentPrice <= activeSignal.stopLoss
+        : currentPrice >= activeSignal.stopLoss)
+      const tpHit = currentPrice > 0 && (isBuy
+        ? currentPrice >= activeSignal.takeProfit
+        : currentPrice <= activeSignal.takeProfit)
 
-      if (!expired) {
-        const isBuy = activeSignal.direction === 'BUY'
-        const slHit = currentPrice > 0 && (isBuy
-          ? currentPrice <= activeSignal.stopLoss
-          : currentPrice >= activeSignal.stopLoss)
-        const tpHit = currentPrice > 0 && (isBuy
-          ? currentPrice >= activeSignal.takeProfit
-          : currentPrice <= activeSignal.takeProfit)
-
-        if (slHit)      { await closeAndRecord('SL_HIT') }
-        else if (tpHit) { await closeAndRecord('TP_HIT') }
-        else            { return }
-      }
+      if (slHit)      { await closeAndRecord('SL_HIT') }
+      else if (tpHit) { await closeAndRecord('TP_HIT') }
+      else            { return }  // keep signal open until SL/TP regardless of expiry
     }
 
     try {
@@ -269,11 +265,6 @@ export function useLiveData() {
         updateSignalSL(newSL, 'TRAILING')
         persistLifecycle(activeSignal.id, 'TRAILING', newSL)
       }
-      return
-    }
-
-    if (Date.now() > new Date(activeSignal.expiresAt).getTime()) {
-      await closeAndRecord('EXPIRED')
     }
   }
 

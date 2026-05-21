@@ -124,6 +124,9 @@ function scoreLiquidity(f: GoldFeatures, bullish: string[], bearish: string[]): 
   if (f.sslDistancePips > 2000 && isBull) {
     score += 0.2; bullish.push('Large SSL buffer below — SL breathing room')
   }
+  if (f.bslDistancePips > 2000 && !isBull) {
+    score += 0.2; bearish.push('Large BSL buffer above — SL breathing room')
+  }
   if (f.liquidityImbalance > 0.3)       { score += 0.2; bullish.push('More BSL than SSL — buy-side pressure') }
   else if (f.liquidityImbalance < -0.3) { score += 0.2; bearish.push('More SSL than BSL — sell-side pressure') }
 

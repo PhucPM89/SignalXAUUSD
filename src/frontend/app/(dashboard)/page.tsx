@@ -8,7 +8,6 @@ import GoldChart from '@/components/charts/GoldChart'
 import SignalCard from '@/components/signals/SignalCard'
 import CorrelationPanel from '@/components/macro/CorrelationPanel'
 import NewsPanel from '@/components/news/NewsPanel'
-import LiveWinRatePanel from '@/components/signals/LiveWinRatePanel'
 import SignalHistoryPanel from '@/components/signals/SignalHistoryPanel'
 import { SessionPanel } from '@/components/panels/SessionPanel'
 import { VolatilityPanel } from '@/components/panels/VolatilityPanel'
@@ -144,11 +143,6 @@ export default function DashboardPage() {
               />
             </div>
           )}
-
-          {/* Live win rate */}
-          <div className="px-3 py-3 flex-shrink-0">
-            <LiveWinRatePanel />
-          </div>
 
           {/* Signal history — Firebase-backed, paginated */}
           <div className="border-t border-zinc-800/60 flex-shrink-0">

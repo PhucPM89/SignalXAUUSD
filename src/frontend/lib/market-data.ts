@@ -197,7 +197,7 @@ export interface TickData {
 
 let _tickCache: TickData = { price: 0, change24H: 0, changePct24H: 0 }
 let _tickTs = 0
-const TICK_CACHE_MS = 1_500   // goldprice.org updates ~1s; no need to hit it faster
+const TICK_CACHE_MS = 800   // reduced from 1500 — get fresh price within 800ms
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -206,7 +206,24 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   ])
 }
 
-// ── Source 1: goldprice.org — free spot gold, no auth, ~1s update ──────────
+// ── Source 1: metals.live — free real-time spot gold, fast, no auth ─────────
+async function fetchMetalsLive(): Promise<TickData> {
+  const res = await fetch('https://api.metals.live/v1/spot', {
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error('metals.live not ok')
+  const data = await res.json()
+  // Response is an array of objects: [{ gold: 3123.45, silver: ..., ... }]
+  const price = Number(Array.isArray(data) ? data[0]?.gold : data?.gold)
+  if (!price || price < 500) throw new Error('metals.live invalid')
+  return {
+    price,
+    change24H:    0,
+    changePct24H: 0,
+  }
+}
+
+// ── Source 2: goldprice.org — free spot gold, no auth, ~1s update ──────────
 async function fetchGoldpriceOrg(): Promise<TickData> {
   const res = await fetch('https://data-asg.goldprice.org/dbXRates/USD', {
     cache: 'no-store',
@@ -224,7 +241,7 @@ async function fetchGoldpriceOrg(): Promise<TickData> {
   }
 }
 
-// ── Source 2: Yahoo Finance v7 — GC=F futures, good fallback ───────────────
+// ── Source 3: Yahoo Finance v7 — GC=F futures, good fallback ───────────────
 async function fetchYahooV7(sym: string): Promise<TickData> {
   const res = await fetch(
     `${YAHOO_BASE}/v7/finance/quote?symbols=${encodeURIComponent(sym)}`,
@@ -241,7 +258,7 @@ async function fetchYahooV7(sym: string): Promise<TickData> {
   return { price, change24H, changePct24H }
 }
 
-// ── Source 3: Yahoo Finance v8 chart — last-resort fallback ────────────────
+// ── Source 4: Yahoo Finance v8 chart — last-resort fallback ────────────────
 async function fetchYahooV8(sym: string): Promise<TickData> {
   const res = await fetch(
     `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1m&range=5m`,
@@ -263,15 +280,23 @@ export async function fetchTickData(_symbol: string): Promise<TickData> {
   if (_tickCache.price > 0 && now - _tickTs < TICK_CACHE_MS) return _tickCache
 
   try {
-    // Race all three sources — use whichever responds first with a valid price
+    // Race all four sources — whichever responds first with a valid price wins.
+    // metals.live and goldprice.org are spot price; Yahoo is GC=F futures (~$5-15 premium).
+    // Prefer spot sources — they race first and usually win.
     const result = await withTimeout(
       Promise.any([
+        fetchMetalsLive(),
         fetchGoldpriceOrg(),
         fetchYahooV7(YAHOO_SYMBOLS['XAUUSD']),
         fetchYahooV8(YAHOO_SYMBOLS['XAUUSD']),
       ]),
-      4_000,   // overall wall-clock cap
+      3_000,   // reduced from 4s — fail fast so stale price is returned sooner
     )
+    // Merge: prefer change24H from goldprice if metals.live won (it has no 24H change)
+    if (result.change24H === 0 && _tickCache.price > 0) {
+      result.change24H    = _tickCache.change24H
+      result.changePct24H = _tickCache.changePct24H
+    }
     _tickCache = result
     _tickTs    = now
   } catch {

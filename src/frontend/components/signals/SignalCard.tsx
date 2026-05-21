@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo } from 'react'
+import React, { useMemo, useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
-import { TrendingUp, TrendingDown, AlertTriangle, Shield, Clock } from 'lucide-react'
+import { TrendingUp, TrendingDown, AlertTriangle, Shield, Clock, Timer } from 'lucide-react'
 import type { Signal } from '@/types/trading'
 import { formatGold, REGIME_COLORS } from '@/types/trading'
 import { cn } from '@/lib/utils'
@@ -25,6 +25,27 @@ interface SignalCardProps {
  *  4. Macro correlations strip
  *  5. Risk warnings (if any)
  */
+function useCountdown(expiresAt: string) {
+  const [remaining, setRemaining] = useState(0)
+
+  useEffect(() => {
+    const target = new Date(expiresAt).getTime()
+    const tick = () => setRemaining(Math.max(0, target - Date.now()))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [expiresAt])
+
+  if (remaining <= 0) return { display: 'EXPIRED', expired: true }
+  const h = Math.floor(remaining / 3_600_000)
+  const m = Math.floor((remaining % 3_600_000) / 60_000)
+  const s = Math.floor((remaining % 60_000) / 1000)
+  const display = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return { display, expired: false }
+}
+
 export default function SignalCard({ signal, expanded = false, onExpand }: SignalCardProps) {
   const isBuy = signal.direction === 'BUY'
   const directionColor = isBuy ? 'text-emerald-400' : 'text-red-400'
@@ -35,6 +56,7 @@ export default function SignalCard({ signal, expanded = false, onExpand }: Signa
     () => formatDistanceToNow(new Date(signal.generatedAt), { addSuffix: true }),
     [signal.generatedAt]
   )
+  const countdown = useCountdown(signal.expiresAt)
 
   const slDollars = Math.abs(signal.entryPrice - signal.stopLoss).toFixed(2)
   const tpDollars = Math.abs(signal.takeProfit - signal.entryPrice).toFixed(2)
@@ -98,19 +120,27 @@ export default function SignalCard({ signal, expanded = false, onExpand }: Signa
           label="ENTRY"
           price={signal.entryPrice}
           color="text-white"
-          sub={`Market`}
+          sub={
+            <span className={cn(
+              'flex items-center gap-0.5 font-mono font-bold text-[10px]',
+              countdown.expired ? 'text-zinc-500' : 'text-amber-400',
+            )}>
+              <Timer size={8} />
+              {countdown.display}
+            </span>
+          }
         />
         <PriceLevel
           label="STOP LOSS"
           price={signal.stopLoss}
           color="text-red-400"
-          sub={`$${slDollars} (${slPips.toFixed(0)} pips)`}
+          sub={<span className="text-[10px] text-zinc-500">${slDollars} ({slPips.toFixed(0)} pips)</span>}
         />
         <PriceLevel
           label="TAKE PROFIT"
           price={signal.takeProfit}
           color="text-emerald-400"
-          sub={`$${tpDollars} (${tpPips.toFixed(0)} pips)`}
+          sub={<span className="text-[10px] text-zinc-500">${tpDollars} ({tpPips.toFixed(0)} pips)</span>}
         />
       </div>
 
@@ -214,12 +244,12 @@ export default function SignalCard({ signal, expanded = false, onExpand }: Signa
   )
 }
 
-function PriceLevel({ label, price, color, sub }: { label: string; price: number; color: string; sub?: string }) {
+function PriceLevel({ label, price, color, sub }: { label: string; price: number; color: string; sub?: React.ReactNode }) {
   return (
     <div className="bg-zinc-800/50 rounded-lg p-2">
       <p className="text-[9px] text-zinc-500 font-bold tracking-widest uppercase mb-0.5">{label}</p>
       <p className={cn('text-sm font-mono font-bold', color)}>{formatGold(price)}</p>
-      {sub && <p className="text-[10px] text-zinc-500 mt-0.5">{sub}</p>}
+      {sub && <div className="mt-0.5">{sub}</div>}
     </div>
   )
 }
