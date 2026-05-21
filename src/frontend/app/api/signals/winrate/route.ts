@@ -99,7 +99,7 @@ export async function GET() {
     const mtfConfluence  = Math.abs(htfScore) > 50
     const vixExtreme     = features.vixLevel > 35
     const atrCompression = features.atrRatio < 0.5
-    const atrExpansion   = features.atrRatio > 1.3
+    const atrExpansion   = features.atrRatio > 1.1   // atr/12 > 1.1 → ATR > ~$13
 
     // BUY scenario — htf bullish structure is aligned
     const buyWinRate = calculateWinRate({
@@ -171,13 +171,12 @@ function countMacroAligned(f: GoldFeatures, bull: boolean): number {
   } else {
     if (f.dxyMomentum   < -0.15) n++
     if (f.yieldMomentum < -0.15) n++
-    if (f.riskOffScore  <  0.3)  n++
+    if (f.riskOnScore   >  0.5)  n++   // symmetric threshold to riskOffScore > 0.5 above
   }
   return n
 }
 
 function isMacroDivergent(f: GoldFeatures, bull: boolean): boolean {
-  return bull
-    ? f.dxyMomentum < -0.3 || f.yieldMomentum < -0.3
-    : f.dxyMomentum >  0.3 || f.yieldMomentum >  0.3
+  if (bull)  return f.dxyMomentum < -0.3 || f.yieldMomentum < -0.3 || f.riskOnScore  > 0.6
+  return f.dxyMomentum > 0.3 || f.yieldMomentum > 0.3 || f.riskOffScore > 0.6
 }

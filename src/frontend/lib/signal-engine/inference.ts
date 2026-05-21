@@ -113,7 +113,7 @@ export async function generateSignal(): Promise<Signal | null> {
     eventMedLt30m:    false,
     vixExtreme:       features.vixLevel > 35,
     atrCompression:   features.atrRatio < 0.5,
-    atrExpansion:     features.atrRatio > 1.3,
+    atrExpansion:     features.atrRatio > 1.1,   // atr/12 > 1.1 → ATR > ~$13 (recalibrated)
   })
 
   // 10. Reasoning narrative
@@ -261,9 +261,9 @@ function countMacroAligned(f: ReturnType<typeof extractFeatures>, bull: boolean)
     if (f.yieldMomentum > 0.15) count++
     if (f.riskOffScore > 0.5)   count++
   } else {
-    if (f.dxyMomentum < -0.15)  count++
+    if (f.dxyMomentum < -0.15)   count++
     if (f.yieldMomentum < -0.15) count++
-    if (f.riskOnScore > 0.3)    count++   // risk-on environment supports SELL
+    if (f.riskOnScore > 0.5)     count++   // symmetric threshold to riskOffScore check above
   }
   return count
 }

@@ -17,12 +17,11 @@ const PRESENCE_INTERVAL_MS = 30_000
 
 function deriveSession(): SessionType {
   const h = new Date().getUTCHours()
-  if (h >= 22 || h <= 2)             return 'Sydney'
-  if (h >= 2  && h < 8)              return 'Tokyo'
-  if (h >= 13 && h <= 16)            return 'Overlap'
-  if (h >= 8  && h < 13)             return 'London'
-  if (h >= 13 && h < 22)             return 'NewYork'
-  return 'OffSession'
+  if (h >= 22 || h <= 1)  return 'Sydney'
+  if (h >= 2  && h <= 7)  return 'Tokyo'
+  if (h >= 13 && h <= 16) return 'Overlap'
+  if (h >= 8  && h <= 12) return 'London'
+  return 'NewYork'
 }
 
 function getSessionId(): string {

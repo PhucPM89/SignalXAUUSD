@@ -68,6 +68,9 @@ export interface WinRateResult {
   regime_prior_pct: number
   final_probability: number
   percentage: number
+  // Complementary probability for the opposite direction (1 - final_probability)
+  opposite_final_probability?: number
+  opposite_percentage?: number
   tier: 'ELITE' | 'HIGH' | 'MODERATE' | 'LOW'
   kelly_fraction: number
   quarter_kelly_pct: number
@@ -158,11 +161,18 @@ export function calculateWinRate(input: WinRateInput): WinRateResult {
   const tier: WinRateResult['tier'] =
     p >= 0.75 ? 'ELITE' : p >= 0.65 ? 'HIGH' : p >= 0.55 ? 'MODERATE' : 'LOW'
 
+  const finalProbRounded = Math.round(finalProb * 10000) / 10000
+  const percentageRounded = Math.round(finalProb * 100)
+  const oppositeProbRounded = Math.round((1 - finalProb) * 10000) / 10000
+  const oppositePercentage = 100 - percentageRounded
+
   return {
     regime: input.regime,
     regime_prior_pct: Math.round(prior * 1000) / 10,
-    final_probability: Math.round(finalProb * 10000) / 10000,
-    percentage: Math.round(finalProb * 100),
+    final_probability: finalProbRounded,
+    percentage: percentageRounded,
+    opposite_final_probability: oppositeProbRounded,
+    opposite_percentage: oppositePercentage,
     tier,
     kelly_fraction: Math.round(kelly * 10000) / 10000,
     quarter_kelly_pct: Math.round(quarterKelly * 10000) / 100,
