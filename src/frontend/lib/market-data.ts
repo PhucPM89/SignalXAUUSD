@@ -137,54 +137,86 @@ export interface TickData {
 
 let _tickCache: TickData = { price: 0, change24H: 0, changePct24H: 0 }
 let _tickTs = 0
-const TICK_CACHE_MS = 800   // fits within 500ms frontend poll cycle
+const TICK_CACHE_MS = 1_500   // goldprice.org updates ~1s; no need to hit it faster
 
-export async function fetchTickData(symbol: string): Promise<TickData> {
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+  ])
+}
+
+// ── Source 1: goldprice.org — free spot gold, no auth, ~1s update ──────────
+async function fetchGoldpriceOrg(): Promise<TickData> {
+  const res = await fetch('https://data-asg.goldprice.org/dbXRates/USD', {
+    cache: 'no-store',
+    headers: { 'Accept': 'application/json' },
+  })
+  if (!res.ok) throw new Error('goldprice not ok')
+  const data  = await res.json()
+  const item  = data?.items?.[0]
+  const price = Number(item?.xauPrice)
+  if (!price || price < 500) throw new Error('goldprice invalid')
+  return {
+    price,
+    change24H:    Number(item?.chgXau ?? 0),
+    changePct24H: Number(item?.pcXau  ?? 0),
+  }
+}
+
+// ── Source 2: Yahoo Finance v7 — GC=F futures, good fallback ───────────────
+async function fetchYahooV7(sym: string): Promise<TickData> {
+  const res = await fetch(
+    `${YAHOO_BASE}/v7/finance/quote?symbols=${encodeURIComponent(sym)}`,
+    { cache: 'no-store' },
+  )
+  if (!res.ok) throw new Error('yahoo v7 not ok')
+  const data  = await res.json()
+  const quote = data?.quoteResponse?.result?.[0]
+  const price = Number(quote?.regularMarketPrice ?? 0)
+  if (!price || price < 500) throw new Error('yahoo v7 invalid')
+  const prev         = Number(quote?.regularMarketPreviousClose ?? price)
+  const change24H    = price - prev
+  const changePct24H = prev > 0 ? (change24H / prev) * 100 : 0
+  return { price, change24H, changePct24H }
+}
+
+// ── Source 3: Yahoo Finance v8 chart — last-resort fallback ────────────────
+async function fetchYahooV8(sym: string): Promise<TickData> {
+  const res = await fetch(
+    `${YAHOO_BASE}/v8/finance/chart/${sym}?interval=1m&range=5m`,
+    { cache: 'no-store' },
+  )
+  if (!res.ok) throw new Error('yahoo v8 not ok')
+  const data  = await res.json()
+  const meta  = data?.chart?.result?.[0]?.meta
+  const price = Number(meta?.regularMarketPrice ?? 0)
+  if (!price || price < 500) throw new Error('yahoo v8 invalid')
+  const prev         = Number(meta?.chartPreviousClose ?? price)
+  const change24H    = price - prev
+  const changePct24H = prev > 0 ? (change24H / prev) * 100 : 0
+  return { price, change24H, changePct24H }
+}
+
+export async function fetchTickData(_symbol: string): Promise<TickData> {
   const now = Date.now()
   if (_tickCache.price > 0 && now - _tickTs < TICK_CACHE_MS) return _tickCache
 
-  const yahooSym = YAHOO_SYMBOLS[symbol] ?? symbol
-
-  // Primary: v7 quote endpoint — returns only current price metadata, no OHLCV array
   try {
-    const ac1  = new AbortController()
-    const tid1 = setTimeout(() => ac1.abort(), 3_000)
-    const res   = await fetch(
-      `${YAHOO_BASE}/v7/finance/quote?symbols=${encodeURIComponent(yahooSym)}`,
-      { cache: 'no-store', signal: ac1.signal }
-    ).finally(() => clearTimeout(tid1))
-    const data  = await res.json()
-    const quote = data?.quoteResponse?.result?.[0]
-    const price = (quote?.regularMarketPrice as number) ?? 0
-    if (price > 0) {
-      const prev         = (quote?.regularMarketPreviousClose as number) ?? price
-      const change24H    = price - prev
-      const changePct24H = prev > 0 ? (change24H / prev) * 100 : 0
-      _tickCache = { price, change24H, changePct24H }
-      _tickTs    = now
-      return _tickCache
-    }
-  } catch { /* fall through to chart fallback */ }
-
-  // Fallback: chart endpoint with minimal 5-minute range
-  try {
-    const ac2  = new AbortController()
-    const tid2 = setTimeout(() => ac2.abort(), 3_000)
-    const res       = await fetch(
-      `${YAHOO_BASE}/v8/finance/chart/${yahooSym}?interval=1m&range=5m`,
-      { cache: 'no-store', signal: ac2.signal }
-    ).finally(() => clearTimeout(tid2))
-    const data      = await res.json()
-    const meta      = data?.chart?.result?.[0]?.meta
-    const price     = (meta?.regularMarketPrice as number) ?? 0
-    const prevClose = (meta?.chartPreviousClose as number) ?? price
-    if (price > 0) {
-      const change24H    = price - prevClose
-      const changePct24H = prevClose > 0 ? (change24H / prevClose) * 100 : 0
-      _tickCache = { price, change24H, changePct24H }
-      _tickTs    = now
-    }
-  } catch { /* keep last cached value */ }
+    // Race all three sources — use whichever responds first with a valid price
+    const result = await withTimeout(
+      Promise.any([
+        fetchGoldpriceOrg(),
+        fetchYahooV7(YAHOO_SYMBOLS['XAUUSD']),
+        fetchYahooV8(YAHOO_SYMBOLS['XAUUSD']),
+      ]),
+      4_000,   // overall wall-clock cap
+    )
+    _tickCache = result
+    _tickTs    = now
+  } catch {
+    // All sources failed — return last cached value (price stays stale rather than zeroing)
+  }
 
   return _tickCache
 }
