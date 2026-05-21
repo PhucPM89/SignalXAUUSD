@@ -312,7 +312,7 @@ function buildReasoning(
   else if (f.volatilityRegime < 0.15) volatilityWarning = '⚠ Low volatility — wait for expansion confirmation.'
 
   const riskWarnings = [...scoring.riskWarnings]
-  if (!structured.usedStructure) riskWarnings.push('No nearby demand/supply zones — ATR-based SL/TP used as fallback')
+  if (structured.usedStructure === false) riskWarnings.push('No nearby demand/supply zones — ATR-based SL/TP used as fallback')
   if ((scoring.layerScores.structure ?? 0) < 0.3) riskWarnings.push('Weak HTF structure alignment — reduce position size')
   if ((scoring.layerScores.macro ?? 0) < 0.3) riskWarnings.push('Weak macro confirmation — monitor DXY reaction')
 

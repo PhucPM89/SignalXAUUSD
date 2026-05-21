@@ -112,11 +112,14 @@ export const useTradingStore = create<TradingState>()(
       setActiveSignal: (signal) => set({ activeSignal: signal }),
 
       addSignalToHistory: (signal) => set((s) => {
-        const isTradeable = signal.direction === 'BUY' || signal.direction === 'SELL'
+        const isTradeable    = signal.direction === 'BUY' || signal.direction === 'SELL'
+        const hasActiveTrade = s.activeSignal?.direction === 'BUY' || s.activeSignal?.direction === 'SELL'
         return {
           signalHistory:    isTradeable ? [signal, ...s.signalHistory].slice(0, 100) : s.signalHistory,
           signalCount:      isTradeable ? s.signalCount + 1 : s.signalCount,
-          activeSignal:     signal,
+          // Guard: never overwrite an active BUY/SELL with a NOTRADE signal.
+          // An active trade is only replaced by another tradeable signal or after closeActiveSignal() is called.
+          activeSignal:     isTradeable || !hasActiveTrade ? signal : s.activeSignal,
           signalPhase:      isTradeable ? 'OPEN' : s.signalPhase,
           lastSignalResult: isTradeable ? null : s.lastSignalResult,
           currentSession:   signal.session ?? s.currentSession,

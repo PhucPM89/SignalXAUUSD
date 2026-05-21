@@ -56,7 +56,7 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
 
   const bullScore = directionalScore(features, true)
   const bearScore = directionalScore(features, false)
-  if (Math.abs(bullScore - bearScore) < 0.05)
+  if (Math.abs(bullScore - bearScore) < 0.08)
     return noTrade('Insufficient directional conviction — market ambiguous', warnings)
 
   const direction: 'Buy' | 'Sell' = bullScore > bearScore ? 'Buy' : 'Sell'
