@@ -73,9 +73,11 @@ function computeBuy(
   const slPrice = r2(sl.price)
   const riskDist = entry - slPrice
 
-  // ── Take Profit — next supply zone, minimum 1.5R above entry ──────────────
-  const minTP = entry + riskDist * 1.5
-  const maxTP = entry + riskDist * 5.0
+  // ── Take Profit — nearest supply zone above entry (no R:R minimum) ─────────
+  // Minimum: $2 or 0.25 ATR (prevents micro-TPs); Maximum: 6 ATR (prevents fantasy TPs)
+  const minTPDist = Math.max(atr * 0.25, 2.0)
+  const minTP     = entry + minTPDist
+  const maxTP     = entry + atr * 6
 
   const tpCandidates: { price: number; reason: string }[] = []
 
@@ -86,14 +88,14 @@ function computeBuy(
   if (bearOBsAbove.length)
     tpCandidates.push({ price: bearOBsAbove[0].low - buffer, reason: 'Bearish OB supply zone' })
 
-  // 2. BSL equal highs not yet swept (price hunts liquidity above resistance)
+  // 2. BSL equal highs not yet swept (price hunts liquidity above)
   const bslAbove = htf.liquidityLevels
     .filter(l => l.description.includes('BSL') && !l.isSwept && l.price > minTP && l.price < maxTP)
     .sort((a, b) => a.price - b.price)
   if (bslAbove.length)
     tpCandidates.push({ price: bslAbove[0].price - buffer, reason: 'BSL equal highs liquidity target' })
 
-  // 3. Swing high (last structural resistance)
+  // 3. Swing high (structural resistance)
   if (htf.swingHigh > minTP && htf.swingHigh < maxTP)
     tpCandidates.push({ price: htf.swingHigh - buffer, reason: 'Swing high resistance' })
 
@@ -108,7 +110,7 @@ function computeBuy(
     .filter(c => c.price > minTP && c.price < maxTP)
     .sort((a, b) => a.price - b.price)  // take nearest valid level
 
-  const tp = validTP[0] ?? { price: r2(entry + riskDist * 2.2), reason: 'Proportional TP (no supply zone detected)' }
+  const tp = validTP[0] ?? { price: r2(entry + Math.max(riskDist * 1.5, minTPDist * 2)), reason: 'ATR-based TP (no supply zone detected)' }
 
   return {
     stopLoss:      slPrice,
@@ -158,9 +160,10 @@ function computeSell(
   const slPrice = r2(sl.price)
   const riskDist = slPrice - entry
 
-  // ── Take Profit — next demand zone, minimum 1.5R below entry ──────────────
-  const minTP = entry - riskDist * 1.5
-  const maxTP = entry - riskDist * 5.0
+  // ── Take Profit — nearest demand zone below entry (no R:R minimum) ─────────
+  const minTPDist = Math.max(atr * 0.25, 2.0)
+  const minTP     = entry - minTPDist     // nearest acceptable TP (just below entry)
+  const maxTP     = entry - atr * 6      // furthest acceptable TP
 
   const tpCandidates: { price: number; reason: string }[] = []
 
@@ -171,14 +174,14 @@ function computeSell(
   if (bullOBsBelow.length)
     tpCandidates.push({ price: bullOBsBelow[0].high + buffer, reason: 'Bullish OB demand zone' })
 
-  // 2. SSL equal lows below entry (price hunts liquidity below support)
+  // 2. SSL equal lows below entry (price hunts sell-side liquidity)
   const sslBelow = htf.liquidityLevels
     .filter(l => l.description.includes('SSL') && !l.isSwept && l.price < minTP && l.price > maxTP)
     .sort((a, b) => b.price - a.price)
   if (sslBelow.length)
     tpCandidates.push({ price: sslBelow[0].price + buffer, reason: 'SSL equal lows liquidity target' })
 
-  // 3. Swing low (previous support)
+  // 3. Swing low (structural support)
   if (htf.swingLow < minTP && htf.swingLow > maxTP)
     tpCandidates.push({ price: htf.swingLow + buffer, reason: 'Swing low support' })
 
@@ -193,7 +196,7 @@ function computeSell(
     .filter(c => c.price < minTP && c.price > maxTP)
     .sort((a, b) => b.price - a.price)  // take nearest valid level
 
-  const tp = validTP[0] ?? { price: r2(entry - riskDist * 2.2), reason: 'Proportional TP (no demand zone detected)' }
+  const tp = validTP[0] ?? { price: r2(entry - Math.max(riskDist * 1.5, minTPDist * 2)), reason: 'ATR-based TP (no demand zone detected)' }
 
   return {
     stopLoss:      slPrice,

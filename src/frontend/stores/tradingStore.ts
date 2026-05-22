@@ -116,78 +116,15 @@ export const useTradingStore = create<TradingState>()(
         const isTradeable    = signal.direction === 'BUY' || signal.direction === 'SELL'
         const hasActiveTrade = s.activeSignal?.direction === 'BUY' || s.activeSignal?.direction === 'SELL'
 
-        // Replacement policy constants (tweak as needed)
-        const REPLACE_MIN_AGE_MS = 5 * 60_000           // don't replace within first 5 minutes unless institutional upgrade
-        const CONFIDENCE_DELTA = 12                     // incoming must beat current by this to replace
-        const DIRECTION_CONFIDENCE_DELTA = 20           // stronger threshold for opposite-direction replacement
-
-        function shouldReplace(existing: Signal | null, incoming: Signal): {ok: boolean; reason?: string} {
-          if (!existing) return { ok: true, reason: 'no existing' }
-          // If existing is not a tradeable signal, allow replace
-          const existingIsTradeable = existing.direction === 'BUY' || existing.direction === 'SELL'
-          if (!existingIsTradeable) return { ok: true, reason: 'existing not tradeable' }
-
-          const now = Date.now()
-          const existingExpired = now > new Date(existing.expiresAt).getTime()
-          if (existingExpired) return { ok: true, reason: 'existing expired' }
-
-          const age = now - new Date(existing.generatedAt).getTime()
-          const incomingInstitutionalUpgrade = !!incoming.isInstitutionalGrade && !existing.isInstitutionalGrade
-          const incomingConf = incoming.confidenceScore ?? 0
-          const existingConf = existing.confidenceScore ?? 0
-          const confidentUpgrade = incomingConf >= existingConf + CONFIDENCE_DELTA
-          const directionFlipUpgrade = incoming.direction !== existing.direction && incomingConf >= existingConf + DIRECTION_CONFIDENCE_DELTA
-
-          if (incomingInstitutionalUpgrade) return { ok: true, reason: 'institutional upgrade' }
-          if (confidentUpgrade) {
-            if (age >= REPLACE_MIN_AGE_MS) return { ok: true, reason: 'confidence upgrade after min age' }
-            return { ok: false, reason: 'confidence upgrade too soon' }
-          }
-          if (directionFlipUpgrade) {
-            if (age >= REPLACE_MIN_AGE_MS) return { ok: true, reason: 'direction flip with strong confidence after min age' }
-            return { ok: false, reason: 'direction flip too soon' }
-          }
-
-          return { ok: false, reason: 'no replacement criteria met' }
-        }
-
-        // Decide new activeSignal according to policy
+        // A new signal becomes active ONLY when there is no current active BUY/SELL trade.
+        // Signals remain live until SL_HIT or TP_HIT — expiry, confidence upgrades, and
+        // direction flips never displace an open position.
         let newActive = s.activeSignal
-        let replaceReason: string | undefined
-        if (isTradeable) {
-          if (!hasActiveTrade) {
-            newActive = signal
-            replaceReason = 'no active trade'
-          } else {
-            const check = shouldReplace(s.activeSignal, signal)
-            if (check.ok) {
-              newActive = signal
-              replaceReason = check.reason
-            } else {
-              newActive = s.activeSignal
-            }
-          }
-        } else {
-          // incoming NOTRADE never overwrites an existing active trade
-          newActive = isTradeable || !hasActiveTrade ? signal : s.activeSignal
-        }
-
-        if (replaceReason) {
-          try {
-            // Lightweight audit log in the browser console for troubleshooting
-            // eslint-disable-next-line no-console
-            console.info('[signals] replace activeSignal', {
-              oldId: s.activeSignal?.id,
-              oldGeneratedAt: s.activeSignal?.generatedAt,
-              oldExpiresAt: s.activeSignal?.expiresAt,
-              oldConf: s.activeSignal?.confidenceScore,
-              newId: signal.id,
-              newGeneratedAt: signal.generatedAt,
-              newExpiresAt: signal.expiresAt,
-              newConf: signal.confidenceScore,
-              reason: replaceReason,
-            })
-          } catch {}
+        if (isTradeable && !hasActiveTrade) {
+          newActive = signal
+        } else if (!isTradeable && !hasActiveTrade) {
+          // NOTRADE updates context (session/regime) but never becomes activeSignal
+          newActive = s.activeSignal
         }
 
         return {

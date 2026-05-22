@@ -86,7 +86,7 @@ export async function generateSignal(): Promise<Signal | null> {
   const riskDist   = Math.abs(entryPrice - stopLoss)
   const rrRatio    = riskDist > 0 ? round2(Math.abs(takeProfit - entryPrice) / riskDist) : 0
 
-  if (rrRatio < 1.5) return noTrade(`Structure R:R ${rrRatio.toFixed(1)} below 1.5`)
+  if (rrRatio < 0.5) return noTrade(`Structure R:R ${rrRatio.toFixed(1)} below minimum 0.5`)
 
   // 9. Bayesian win rate
   const bull = direction === 'Buy'
