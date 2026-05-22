@@ -129,7 +129,8 @@ export async function generateSignal(): Promise<Signal | null> {
     news:       scoring.layerScores.news       ?? 0,
   }
 
-  const winProb     = scoring.confidence / 100
+  // winProbability uses Bayesian result, not the directional conviction score
+  const winProb     = winRateResult.final_probability
   const expectedVal = winProb * (takeProfit - entryPrice) - (1 - winProb) * Math.abs(entryPrice - stopLoss)
   const isInstitutional = scoring.confidence >= 80 && rrRatio >= 2.5
 

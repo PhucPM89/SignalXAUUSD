@@ -1,6 +1,7 @@
 import type { GoldFeatures } from './gold-features'
 
-const CONFIDENCE_THRESHOLD = 72
+const QUALITY_THRESHOLD    = 72   // minimum layer-based signal quality (internal gate)
+const DIRECTION_THRESHOLD  = 55   // minimum directional conviction after normalization
 
 const WEIGHTS = {
   structure:  0.28,
@@ -13,7 +14,10 @@ const WEIGHTS = {
 
 export interface ScoringResult {
   direction: 'Buy' | 'Sell' | 'NoTrade'
+  /** Winning direction's normalized conviction (0–100). buyConviction + sellConviction === 100. */
   confidence: number
+  buyConviction:  number   // BUY's share of total directional conviction (0–100)
+  sellConviction: number   // SELL's share — always 100 - buyConviction
   entryOffsetPips: number
   layerScores: Record<string, number>
   noTradeReason?: string
@@ -39,8 +43,7 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
     news:       scoreNews(features, warnings),
   }
 
-  // Confidence = signal STRENGTH. abs() on directional layers so strong bearish
-  // setup gives same confidence as strong bullish setup.
+  // ── Internal quality gate (not exposed as confidenceScore) ───────────────
   const rawScore =
     Math.abs(layerScores.structure)  * WEIGHTS.structure +
     Math.abs(layerScores.liquidity)  * WEIGHTS.liquidity +
@@ -48,20 +51,30 @@ export function scoreSignal(features: GoldFeatures, currentPrice: number): Scori
     layerScores.volatility           * WEIGHTS.volatility +
     layerScores.session              * WEIGHTS.session   +
     layerScores.news                 * WEIGHTS.news
-  const confidence = Math.round(sigmoidScale(rawScore) * 100)
+  const signalQuality = Math.round(sigmoidScale(rawScore) * 100)
 
-  if (confidence < CONFIDENCE_THRESHOLD)
-    return noTrade(`Confidence ${confidence} below ${CONFIDENCE_THRESHOLD} threshold`, warnings)
+  if (signalQuality < QUALITY_THRESHOLD)
+    return noTrade(`Signal quality ${signalQuality} below ${QUALITY_THRESHOLD} threshold`, warnings)
 
+  // ── Zero-sum directional conviction ───────────────────────────────────────
+  // Normalize raw bull/bear scores so they always sum to 100%.
+  // This guarantees: if BUY = 62, then SELL = 38.
   const bullScore = directionalScore(features, true)
   const bearScore = directionalScore(features, false)
-  if (Math.abs(bullScore - bearScore) < 0.08)
+  const totalDir  = bullScore + bearScore
+
+  const buyConviction  = totalDir > 0 ? Math.round(bullScore / totalDir * 100) : 50
+  const sellConviction = 100 - buyConviction
+
+  const winConviction = Math.max(buyConviction, sellConviction)
+  if (winConviction < DIRECTION_THRESHOLD)
     return noTrade('Insufficient directional conviction — market ambiguous', warnings)
 
-  const direction: 'Buy' | 'Sell' = bullScore > bearScore ? 'Buy' : 'Sell'
+  const direction: 'Buy' | 'Sell' = buyConviction >= sellConviction ? 'Buy' : 'Sell'
+  const confidence    = winConviction   // = active direction's normalized share
   const entryOffsetPips = features.obProximityScore > 0.7 ? 0 : features.obProximityScore > 0.4 ? 100 : 0
 
-  return { direction, confidence, entryOffsetPips,
+  return { direction, confidence, buyConviction, sellConviction, entryOffsetPips,
     layerScores, bullishFactors: bullish, bearishFactors: bearish, riskWarnings: warnings }
 }
 
@@ -221,6 +234,7 @@ function sigmoidScale(raw: number): number {
 }
 
 function noTrade(reason: string, warnings: string[] = []): ScoringResult {
-  return { direction: 'NoTrade', confidence: 0, entryOffsetPips: 0,
-    layerScores: {}, noTradeReason: reason, bullishFactors: [], bearishFactors: [], riskWarnings: warnings }
+  return { direction: 'NoTrade', confidence: 0, buyConviction: 50, sellConviction: 50,
+    entryOffsetPips: 0, layerScores: {}, noTradeReason: reason,
+    bullishFactors: [], bearishFactors: [], riskWarnings: warnings }
 }
