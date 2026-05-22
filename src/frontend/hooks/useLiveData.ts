@@ -57,7 +57,8 @@ export function useLiveData() {
     updateSignalSL, setOnlineUsers, setTotalVisits,
   } = useTradingStore()
 
-  const timers = useRef<ReturnType<typeof setInterval>[]>([])
+  const timers      = useRef<ReturnType<typeof setInterval>[]>([])
+  const deferTimers = useRef<ReturnType<typeof setTimeout>[]>([])
 
   async function pollTick() {
     try {
@@ -272,13 +273,18 @@ export function useLiveData() {
     setConnectionStatus('connecting')
 
     const startPolling = () => {
+      // Critical path: tick + signal fire immediately
       pollTick()
       pollSignal()
-      pollCorrelations()
-      pollNews()
-      pollEvents()
       syncSession()
-      pingPresence()
+
+      // Defer secondary polls to avoid network congestion on initial load
+      deferTimers.current = [
+        setTimeout(pollCorrelations,  600),
+        setTimeout(pingPresence,     1200),
+        setTimeout(pollNews,         2000),
+        setTimeout(pollEvents,       3500),
+      ]
 
       timers.current = [
         setInterval(pollTick,              TICK_INTERVAL_MS),
@@ -295,6 +301,8 @@ export function useLiveData() {
     const stopPolling = () => {
       timers.current.forEach(clearInterval)
       timers.current = []
+      deferTimers.current.forEach(clearTimeout)
+      deferTimers.current = []
     }
 
     // Pause all polling when the tab is hidden; resume on focus

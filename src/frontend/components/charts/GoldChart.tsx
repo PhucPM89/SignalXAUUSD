@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, memo } from 'react'
 import {
   createChart, IChartApi, ISeriesApi,
   CandlestickSeries,
@@ -21,28 +21,7 @@ interface GoldChartProps {
   className?: string
 }
 
-function useCountdown(expiresAt: string | undefined): string {
-  const [display, setDisplay] = useState('')
-  useEffect(() => {
-    if (!expiresAt) return
-    const update = () => {
-      const remaining = Math.max(0, new Date(expiresAt).getTime() - Date.now())
-      if (remaining <= 0) { setDisplay('EXPIRED'); return }
-      const h = Math.floor(remaining / 3_600_000)
-      const m = Math.floor((remaining % 3_600_000) / 60_000)
-      const s = Math.floor((remaining % 60_000) / 1000)
-      setDisplay(h > 0
-        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-        : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`)
-    }
-    update()
-    const id = setInterval(update, 1000)
-    return () => clearInterval(id)
-  }, [expiresAt])
-  return display
-}
-
-export default function GoldChart({ candles, signal, className }: GoldChartProps) {
+const GoldChart = memo(function GoldChart({ candles, signal, className }: GoldChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
   const chartRef       = useRef<IChartApi | null>(null)
   const seriesRef      = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -50,7 +29,6 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
   const staticLinesRef = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([])
 
   const { currentPrice, selectedTimeframe, setTimeframe } = useTradingStore()
-  const countdown = useCountdown(signal?.expiresAt)
 
   // ── 1. Chart initialisation ────────────────────────────────────────────────
   useEffect(() => {
@@ -100,9 +78,9 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
 
     return () => {
       chart.remove()
-      chartRef.current     = null
-      seriesRef.current    = null
-      entryLineRef.current = null
+      chartRef.current       = null
+      seriesRef.current      = null
+      entryLineRef.current   = null
       staticLinesRef.current = []
     }
   }, [])
@@ -135,65 +113,75 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     })
   }, [currentPrice, candles])
 
-  // ── 4a. SL / TP static lines (recreate only when signal identity changes) ──
+  // ── 4. All price lines: SL / TP / Entry + countdown ───────────────────────
+  // Countdown runs via setInterval inside the effect — no React state, no re-renders.
   useEffect(() => {
     const series = seriesRef.current
     if (!series) return
 
+    // Clear all existing lines
     staticLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
     staticLinesRef.current = []
-
-    if (!signal || signal.direction === 'NOTRADE') {
-      if (entryLineRef.current) {
-        try { series.removePriceLine(entryLineRef.current) } catch {}
-        entryLineRef.current = null
-      }
-      return
-    }
-
-    staticLinesRef.current.push(
-      series.createPriceLine({
-        price: signal.stopLoss,
-        color: '#dc2626',
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: `✕ SL  ${formatGold(signal.stopLoss)}`,
-      }),
-      series.createPriceLine({
-        price: signal.takeProfit,
-        color: '#059669',
-        lineWidth: 1,
-        lineStyle: 2,
-        axisLabelVisible: true,
-        title: `◎ TP  ${formatGold(signal.takeProfit)}`,
-      }),
-    )
-  }, [signal])
-
-  // ── 4b. Entry line with live countdown (updates every second) ──────────────
-  useEffect(() => {
-    const series = seriesRef.current
-    if (!series || !signal || signal.direction === 'NOTRADE' || !countdown) return
-
     if (entryLineRef.current) {
       try { series.removePriceLine(entryLineRef.current) } catch {}
       entryLineRef.current = null
     }
 
-    const isBuy  = signal.direction === 'BUY'
-    const accent = isBuy ? '#10b981' : '#ef4444'
-    const mark   = isBuy ? '▲' : '▼'
+    if (!signal || signal.direction === 'NOTRADE') return
 
-    entryLineRef.current = series.createPriceLine({
-      price: signal.entryPrice,
-      color: accent,
-      lineWidth: 2,
-      lineStyle: 0,
-      axisLabelVisible: true,
-      title: `${mark} ENTRY  ${formatGold(signal.entryPrice)}  ⏱ ${countdown}`,
-    })
-  }, [countdown, signal])
+    // SL + TP — static, only recreated when signal identity changes
+    staticLinesRef.current.push(
+      series.createPriceLine({
+        price: signal.stopLoss,
+        color: '#dc2626', lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: `✕ SL  ${formatGold(signal.stopLoss)}`,
+      }),
+      series.createPriceLine({
+        price: signal.takeProfit,
+        color: '#059669', lineWidth: 1, lineStyle: 2, axisLabelVisible: true,
+        title: `◎ TP  ${formatGold(signal.takeProfit)}`,
+      }),
+    )
+
+    // Entry line with live countdown — driven entirely by setInterval, zero React state
+    const isBuy      = signal.direction === 'BUY'
+    const accent     = isBuy ? '#10b981' : '#ef4444'
+    const mark       = isBuy ? '▲' : '▼'
+    const entryPrice = signal.entryPrice
+    const expiresAt  = signal.expiresAt ? new Date(signal.expiresAt).getTime() : null
+
+    const fmtCountdown = (): string => {
+      if (!expiresAt) return ''
+      const rem = Math.max(0, expiresAt - Date.now())
+      if (rem === 0) return ' ⏱ EXPIRED'
+      const h = Math.floor(rem / 3_600_000)
+      const m = Math.floor((rem % 3_600_000) / 60_000)
+      const s = Math.floor((rem % 60_000) / 1000)
+      const t = h > 0
+        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+        : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      return ` ⏱ ${t}`
+    }
+
+    const redrawEntry = () => {
+      const s = seriesRef.current
+      if (!s) return
+      if (entryLineRef.current) {
+        try { s.removePriceLine(entryLineRef.current) } catch {}
+        entryLineRef.current = null
+      }
+      entryLineRef.current = s.createPriceLine({
+        price: entryPrice, color: accent, lineWidth: 2, lineStyle: 0,
+        axisLabelVisible: true,
+        title: `${mark} ENTRY  ${formatGold(entryPrice)}${fmtCountdown()}`,
+      })
+    }
+
+    redrawEntry()
+    const id = expiresAt ? setInterval(redrawEntry, 1000) : undefined
+
+    return () => { if (id !== undefined) clearInterval(id) }
+  }, [signal])
 
   return (
     <div className={cn('flex flex-col bg-[#06060b] rounded-lg overflow-hidden relative', className)}>
@@ -236,6 +224,26 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
       <div className="relative flex-1 min-h-0">
         <div ref={chartContainerRef} className="absolute inset-0" />
 
+        {/* Loading skeleton — shown while candles are being fetched */}
+        {candles.length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#06060b] z-10 pointer-events-none">
+            <div className="flex flex-col items-center gap-3">
+              <div className="flex gap-1 items-end" style={{ height: 48 }}>
+                {[3, 5, 4, 7, 3, 8, 5, 6, 4, 9, 3, 7].map((h, i) => (
+                  <div
+                    key={i}
+                    className="w-2 rounded-sm bg-zinc-800 animate-pulse"
+                    style={{ height: `${h * 5}px`, animationDelay: `${i * 70}ms` }}
+                  />
+                ))}
+              </div>
+              <span className="text-[10px] text-zinc-700 font-mono uppercase tracking-widest">
+                Loading chart…
+              </span>
+            </div>
+          </div>
+        )}
+
         {signal && signal.direction !== 'NOTRADE' && (
           <AIConfidenceOverlay signal={signal} />
         )}
@@ -252,4 +260,6 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
       </div>
     </div>
   )
-}
+})
+
+export default GoldChart

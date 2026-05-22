@@ -26,10 +26,12 @@ export default function SignalPage() {
   const [candles, setCandles]   = useState<Candle[]>([])
 
   useEffect(() => {
-    fetch(`/api/market/candles?timeframe=${selectedTimeframe}&count=500`)
+    const ctrl = new AbortController()
+    fetch(`/api/market/candles?timeframe=${selectedTimeframe}&count=200`, { signal: ctrl.signal })
       .then(r => r.ok ? r.json() : [])
       .then((data: Candle[]) => setCandles(data))
       .catch(() => {})
+    return () => ctrl.abort()
   }, [selectedTimeframe])
 
   const hasActive = activeSignal && activeSignal.direction !== 'NOTRADE'
