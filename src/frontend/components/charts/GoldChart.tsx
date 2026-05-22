@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createChart, IChartApi, ISeriesApi,
   CandlestickSeries,
@@ -21,13 +21,36 @@ interface GoldChartProps {
   className?: string
 }
 
+function useCountdown(expiresAt: string | undefined): string {
+  const [display, setDisplay] = useState('')
+  useEffect(() => {
+    if (!expiresAt) return
+    const update = () => {
+      const remaining = Math.max(0, new Date(expiresAt).getTime() - Date.now())
+      if (remaining <= 0) { setDisplay('EXPIRED'); return }
+      const h = Math.floor(remaining / 3_600_000)
+      const m = Math.floor((remaining % 3_600_000) / 60_000)
+      const s = Math.floor((remaining % 60_000) / 1000)
+      setDisplay(h > 0
+        ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+        : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`)
+    }
+    update()
+    const id = setInterval(update, 1000)
+    return () => clearInterval(id)
+  }, [expiresAt])
+  return display
+}
+
 export default function GoldChart({ candles, signal, className }: GoldChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null)
-  const chartRef  = useRef<IChartApi | null>(null)
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
-  const sigLinesRef = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([])
+  const chartRef       = useRef<IChartApi | null>(null)
+  const seriesRef      = useRef<ISeriesApi<'Candlestick'> | null>(null)
+  const entryLineRef   = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']> | null>(null)
+  const staticLinesRef = useRef<ReturnType<ISeriesApi<'Candlestick'>['createPriceLine']>[]>([])
 
   const { currentPrice, selectedTimeframe, setTimeframe } = useTradingStore()
+  const countdown = useCountdown(signal?.expiresAt)
 
   // ── 1. Chart initialisation ────────────────────────────────────────────────
   useEffect(() => {
@@ -77,9 +100,10 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
 
     return () => {
       chart.remove()
-      chartRef.current  = null
-      seriesRef.current = null
-      sigLinesRef.current = []
+      chartRef.current     = null
+      seriesRef.current    = null
+      entryLineRef.current = null
+      staticLinesRef.current = []
     }
   }, [])
 
@@ -111,29 +135,23 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
     })
   }, [currentPrice, candles])
 
-  // ── 4. Entry / SL / TP price lines ────────────────────────────────────────
+  // ── 4a. SL / TP static lines (recreate only when signal identity changes) ──
   useEffect(() => {
     const series = seriesRef.current
     if (!series) return
 
-    sigLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
-    sigLinesRef.current = []
+    staticLinesRef.current.forEach(l => { try { series.removePriceLine(l) } catch {} })
+    staticLinesRef.current = []
 
-    if (!signal || signal.direction === 'NOTRADE') return
+    if (!signal || signal.direction === 'NOTRADE') {
+      if (entryLineRef.current) {
+        try { series.removePriceLine(entryLineRef.current) } catch {}
+        entryLineRef.current = null
+      }
+      return
+    }
 
-    const isBuy  = signal.direction === 'BUY'
-    const accent = isBuy ? '#10b981' : '#ef4444'
-    const mark   = isBuy ? '▲' : '▼'
-
-    sigLinesRef.current.push(
-      series.createPriceLine({
-        price: signal.entryPrice,
-        color: accent,
-        lineWidth: 2,
-        lineStyle: 0,
-        axisLabelVisible: true,
-        title: `${mark} ENTRY  ${formatGold(signal.entryPrice)}`,
-      }),
+    staticLinesRef.current.push(
       series.createPriceLine({
         price: signal.stopLoss,
         color: '#dc2626',
@@ -152,6 +170,30 @@ export default function GoldChart({ candles, signal, className }: GoldChartProps
       }),
     )
   }, [signal])
+
+  // ── 4b. Entry line with live countdown (updates every second) ──────────────
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series || !signal || signal.direction === 'NOTRADE' || !countdown) return
+
+    if (entryLineRef.current) {
+      try { series.removePriceLine(entryLineRef.current) } catch {}
+      entryLineRef.current = null
+    }
+
+    const isBuy  = signal.direction === 'BUY'
+    const accent = isBuy ? '#10b981' : '#ef4444'
+    const mark   = isBuy ? '▲' : '▼'
+
+    entryLineRef.current = series.createPriceLine({
+      price: signal.entryPrice,
+      color: accent,
+      lineWidth: 2,
+      lineStyle: 0,
+      axisLabelVisible: true,
+      title: `${mark} ENTRY  ${formatGold(signal.entryPrice)}  ⏱ ${countdown}`,
+    })
+  }, [countdown, signal])
 
   return (
     <div className={cn('flex flex-col bg-[#06060b] rounded-lg overflow-hidden relative', className)}>
